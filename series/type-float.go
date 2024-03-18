@@ -93,6 +93,20 @@ func (e floatElement) Int() (int, error) {
 	return int(f), nil
 }
 
+func (e floatElement) Int64() (int64, error) {
+	if e.IsNA() {
+		return 0, fmt.Errorf("can't convert NaN to int")
+	}
+	f := e.e
+	if math.IsInf(f, 1) || math.IsInf(f, -1) {
+		return 0, fmt.Errorf("can't convert Inf to int")
+	}
+	if math.IsNaN(f) {
+		return 0, fmt.Errorf("can't convert NaN to int")
+	}
+	return int64(f), nil
+}
+
 func (e floatElement) Float() float64 {
 	if e.IsNA() {
 		return math.NaN()

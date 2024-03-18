@@ -51,6 +51,7 @@ type Element interface {
 	Val() ElementValue // FIXME: Returning interface is a recipe for pain
 	String() string
 	Int() (int, error)
+	Int64() (int64, error)
 	Float() float64
 	Bool() (bool, error)
 
@@ -123,11 +124,11 @@ const (
 // Indexes represent the elements that can be used for selecting a subset of
 // elements within a Series. Currently supported are:
 //
-//     int            // Matches the given index number
-//     []int          // Matches all given index numbers
-//     []bool         // Matches all elements in a Series marked as true
-//     Series [Int]   // Same as []int
-//     Series [Bool]  // Same as []bool
+//	int            // Matches the given index number
+//	[]int          // Matches all given index numbers
+//	[]bool         // Matches all elements in a Series marked as true
+//	Series [Int]   // Same as []int
+//	Series [Bool]  // Same as []bool
 type Indexes interface{}
 
 // New is the generic Series constructor

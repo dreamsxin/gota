@@ -1,8 +1,10 @@
-module github.com/go-gota/gota
+module github.com/dreamsxin/gota
 
-go 1.16
+go 1.21
+
+toolchain go1.21.5
 
 require (
-	golang.org/x/net v0.0.0-20210423184538-5f58ad60dda6
-	gonum.org/v1/gonum v0.9.1
+	golang.org/x/net v0.18.0
+	gonum.org/v1/gonum v0.15.0
 )

@@ -7,7 +7,7 @@ import (
 )
 
 type intElement struct {
-	e   int
+	e   int64
 	nan bool
 }
 
@@ -27,9 +27,11 @@ func (e *intElement) Set(value interface{}) {
 			e.nan = true
 			return
 		}
-		e.e = i
+		e.e = int64(i)
 	case int:
-		e.e = int(val)
+		e.e = int64(val)
+	case int64:
+		e.e = int64(val)
 	case float64:
 		f := val
 		if math.IsNaN(f) ||
@@ -38,7 +40,7 @@ func (e *intElement) Set(value interface{}) {
 			e.nan = true
 			return
 		}
-		e.e = int(f)
+		e.e = int64(f)
 	case bool:
 		b := val
 		if b {
@@ -47,7 +49,7 @@ func (e *intElement) Set(value interface{}) {
 			e.e = 0
 		}
 	case Element:
-		v, err := val.Int()
+		v, err := val.Int64()
 		if err != nil {
 			e.nan = true
 			return
@@ -95,6 +97,13 @@ func (e intElement) Int() (int, error) {
 	return int(e.e), nil
 }
 
+func (e intElement) Int64() (int64, error) {
+	if e.IsNA() {
+		return 0, fmt.Errorf("can't convert NaN to int")
+	}
+	return e.e, nil
+}
+
 func (e intElement) Float() float64 {
 	if e.IsNA() {
 		return math.NaN()
@@ -116,7 +125,7 @@ func (e intElement) Bool() (bool, error) {
 }
 
 func (e intElement) Eq(elem Element) bool {
-	i, err := elem.Int()
+	i, err := elem.Int64()
 	if err != nil || e.IsNA() {
 		return false
 	}
@@ -124,7 +133,7 @@ func (e intElement) Eq(elem Element) bool {
 }
 
 func (e intElement) Neq(elem Element) bool {
-	i, err := elem.Int()
+	i, err := elem.Int64()
 	if err != nil || e.IsNA() {
 		return false
 	}
@@ -132,7 +141,7 @@ func (e intElement) Neq(elem Element) bool {
 }
 
 func (e intElement) Less(elem Element) bool {
-	i, err := elem.Int()
+	i, err := elem.Int64()
 	if err != nil || e.IsNA() {
 		return false
 	}
@@ -140,7 +149,7 @@ func (e intElement) Less(elem Element) bool {
 }
 
 func (e intElement) LessEq(elem Element) bool {
-	i, err := elem.Int()
+	i, err := elem.Int64()
 	if err != nil || e.IsNA() {
 		return false
 	}
@@ -148,7 +157,7 @@ func (e intElement) LessEq(elem Element) bool {
 }
 
 func (e intElement) Greater(elem Element) bool {
-	i, err := elem.Int()
+	i, err := elem.Int64()
 	if err != nil || e.IsNA() {
 		return false
 	}
@@ -156,7 +165,7 @@ func (e intElement) Greater(elem Element) bool {
 }
 
 func (e intElement) GreaterEq(elem Element) bool {
-	i, err := elem.Int()
+	i, err := elem.Int64()
 	if err != nil || e.IsNA() {
 		return false
 	}
