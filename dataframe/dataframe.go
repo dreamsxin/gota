@@ -110,6 +110,10 @@ func (df *DataFrame) Error() error {
 	return df.Err
 }
 
+func (df DataFrame) Print(shortRows, shortCols, showDims, showTypes bool) (str string) {
+	return df.print(shortRows, shortCols, showDims, showTypes, 10, 70, "DataFrame")
+}
+
 func (df DataFrame) print(
 	shortRows, shortCols, showDims, showTypes bool,
 	maxRows int,
