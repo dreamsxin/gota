@@ -369,15 +369,6 @@ func (s Series) IsNaN() []bool {
 	return ret
 }
 
-func (s Series) FillNaN(value Series) Series {
-	for p, isNaN := range s.IsNaN() {
-		if isNaN {
-			s.Set(p, value)
-		}
-	}
-	return s
-}
-
 // Compare compares the values of a Series with other elements. To do so, the
 // elements with are to be compared are first transformed to a Series of the same
 // type as the caller.
@@ -527,9 +518,7 @@ func (s Series) Float() []float64 {
 	ret := make([]float64, s.Len())
 	for i := 0; i < s.Len(); i++ {
 		e := s.elements.Elem(i)
-		if !e.IsNA() {
-			ret[i] = e.Float()
-		}
+		ret[i] = e.Float()
 	}
 	return ret
 }
@@ -824,11 +813,12 @@ func (s Series) Sum() float64 {
 	if s.elements.Len() == 0 || s.Type() == String || s.Type() == Bool {
 		return math.NaN()
 	}
-	sFloat := s.Float()
-	sum := sFloat[0]
-	for i := 1; i < len(sFloat); i++ {
-		elem := sFloat[i]
-		sum += elem
+	var sum float64
+	for i := 0; i < s.Len(); i++ {
+		e := s.elements.Elem(i)
+		if !e.IsNA() {
+			sum += e.Float()
+		}
 	}
 	return sum
 }
