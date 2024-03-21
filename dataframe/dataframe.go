@@ -460,6 +460,18 @@ type Groups struct {
 	Err         error
 }
 
+// Agg :Aggregate dataframe by aggregation type and aggregation column name
+func (gps Groups) Agg(typ AggregationType, colnames []string) DataFrame {
+	if gps.groups == nil {
+		return DataFrame{Err: fmt.Errorf("Aggregation: input is nil")}
+	}
+	typs := []AggregationType{}
+	for range colnames {
+		typs = append(typs, typ)
+	}
+	return gps.Aggregation(typs, colnames)
+}
+
 // Aggregation :Aggregate dataframe by aggregation type and aggregation column name
 func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFrame {
 	if gps.groups == nil {
