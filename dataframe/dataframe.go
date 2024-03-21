@@ -495,6 +495,10 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 		// Aggregation
 		for i, c := range colnames {
 			curSeries := df.Col(c)
+			if curSeries.Err != nil {
+				curMap[fmt.Sprintf("%s_%s", c, typs[i])] = nil
+				continue
+			}
 			var value float64
 			switch typs[i] {
 			case Aggregation_MAX:
