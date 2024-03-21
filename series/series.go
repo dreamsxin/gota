@@ -518,7 +518,9 @@ func (s Series) Float() []float64 {
 	ret := make([]float64, s.Len())
 	for i := 0; i < s.Len(); i++ {
 		e := s.elements.Elem(i)
-		ret[i] = e.Float()
+		if !e.IsNA() {
+			ret[i] = e.Float()
+		}
 	}
 	return ret
 }
