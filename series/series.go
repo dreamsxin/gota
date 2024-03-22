@@ -583,6 +583,9 @@ func (s Series) Type() Type {
 
 // Len returns the length of a given Series
 func (s Series) Len() int {
+	if s.elements == nil {
+		return 0
+	}
 	return s.elements.Len()
 }
 
@@ -609,12 +612,18 @@ func (s Series) Str() string {
 // Val returns the value of a series for the given index. Will panic if the index
 // is out of bounds.
 func (s Series) Val(i int) interface{} {
+	if s.elements == nil {
+		return nil
+	}
 	return s.elements.Elem(i).Val()
 }
 
 // Elem returns the element of a series for the given index. Will panic if the
 // index is out of bounds.
 func (s Series) Elem(i int) Element {
+	if s.elements == nil {
+		return nil
+	}
 	return s.elements.Elem(i)
 }
 
