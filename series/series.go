@@ -369,6 +369,15 @@ func (s Series) IsNaN() []bool {
 	return ret
 }
 
+func (s Series) FillNaN(value Series) Series {
+	for p, isNaN := range s.IsNaN() {
+		if isNaN {
+			s.Set(p, value)
+		}
+	}
+	return s
+}
+
 // Compare compares the values of a Series with other elements. To do so, the
 // elements with are to be compared are first transformed to a Series of the same
 // type as the caller.
