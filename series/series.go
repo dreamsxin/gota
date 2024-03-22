@@ -538,6 +538,20 @@ func (s Series) Int() ([]int, error) {
 	return ret, nil
 }
 
+func (s Series) Int64() []int64 {
+	ret := make([]int64, s.Len())
+	for i := 0; i < s.Len(); i++ {
+		e := s.elements.Elem(i)
+		val, err := e.Int64()
+		if err != nil {
+			ret[i] = 0
+		} else {
+			ret[i] = val
+		}
+	}
+	return ret
+}
+
 // Bool returns the elements of a Series as a []bool or an error if the
 // transformation is not possible.
 func (s Series) Bool() ([]bool, error) {
