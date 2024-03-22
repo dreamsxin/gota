@@ -308,6 +308,27 @@ func (df DataFrame) Subset(indexes series.Indexes) DataFrame {
 	}
 }
 
+func (df DataFrame) SliceRow(start, end int) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	columns := make([]series.Series, df.ncols)
+	for i, column := range df.columns {
+		s := column.Slice(start, end)
+		columns[i] = s
+		columns[i].Name = column.Name
+	}
+	nrows, ncols, err := checkColumnsDimensions(columns...)
+	if err != nil {
+		return DataFrame{Err: err}
+	}
+	return DataFrame{
+		columns: columns,
+		ncols:   ncols,
+		nrows:   nrows,
+	}
+}
+
 // SelectIndexes are the supported indexes used for the DataFrame.Select method. Currently supported are:
 //
 //	int              // Matches the given index number
@@ -656,21 +677,28 @@ func (df DataFrame) Concat(dfb DataFrame) DataFrame {
 
 // Mutate changes a column of the DataFrame with the given Series or adds it as
 // a new column if the column name does not exist.
-func (df DataFrame) Mutate(s series.Series) DataFrame {
-	if df.Err != nil {
+func (df DataFrame) Mutate(ss ...series.Series) DataFrame {
+	if df.Err != nil || len(ss) == 0 {
 		return df
 	}
-	if s.Len() != df.nrows {
-		return DataFrame{Err: fmt.Errorf("mutate: %s wrong dimensions", s.Name)}
+
+	for i := 0; i < len(ss); i++ {
+		if df.nrows != ss[i].Len() {
+			return DataFrame{Err: fmt.Errorf("mutate: %s wrong dimensions", ss[i].Name)}
+		}
 	}
+
 	df = df.Copy()
 	// Check that colname exist on dataframe
 	columns := df.columns
-	if idx := findInStringSlice(s.Name, df.Names()); idx != -1 {
-		columns[idx] = s
-	} else {
-		columns = append(columns, s)
+	for i := 0; i < len(ss); i++ {
+		if idx := findInStringSlice(ss[i].Name, df.Names()); idx != -1 {
+			columns[idx] = ss[i]
+		} else {
+			columns = append(columns, ss[i])
+		}
 	}
+
 	nrows, ncols, err := checkColumnsDimensions(columns...)
 	if err != nil {
 		return DataFrame{Err: err}
