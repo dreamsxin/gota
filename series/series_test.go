@@ -1835,3 +1835,27 @@ func TestSeries_Slice(t *testing.T) {
 		}
 	}
 }
+
+func TestSeries_FillNaN(t *testing.T) {
+	table := []struct {
+		a        Series
+		expected Series
+	}{
+		{
+			Strings([]interface{}{"a", "b", nil}),
+			Strings([]interface{}{"a", "b", "c"}),
+		},
+	}
+	for testnum, test := range table {
+		a := test.a
+		expected := test.expected.Records()
+		received := a.FillNaN(Strings("c")).Records()
+		t.Log(received)
+		if !reflect.DeepEqual(expected, received) {
+			t.Errorf(
+				"Test:%v\nExpected:\n%v\nReceived:\n%v",
+				testnum, expected, received,
+			)
+		}
+	}
+}

@@ -797,7 +797,7 @@ func (df DataFrame) Arrange(order ...Order) DataFrame {
 	if df.Err != nil {
 		return df
 	}
-	if order == nil || len(order) == 0 {
+	if len(order) == 0 {
 		return DataFrame{Err: fmt.Errorf("rename: no arguments")}
 	}
 

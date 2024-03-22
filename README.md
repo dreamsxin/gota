@@ -417,6 +417,14 @@ Float
 String
 Bool
 ```
+### Usage
+
+#### FillNaN
+
+```go
+s := series.New([]interface{"a", "b", nil}, series.String, "COL.1")
+s.FillNaN(Strings("c"))
+```
 
 For more information about the API, make sure to check:
 
