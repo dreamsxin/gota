@@ -259,6 +259,18 @@ groups := df.GroupBy("key1", "key2") // Group by column "key1", and column "key2
 aggre := groups.Aggregation([]AggregationType{Aggregation_MAX, Aggregation_MIN}, []string{"values", "values2"}) // Maximum value in column "values",  Minimum value in column "values2"
 ```
 
+#### Pivot
+
+```go
+pivot := df.Pivot(
+    []string{"A", "B"}, // rows
+    []string{"C", "D"}, // columns
+    []PivotValue{       // values
+      {Colname: "E", AggregationType: Aggregation_SUM},
+      {Colname: "F", AggregationType: Aggregation_COUNT},
+})
+```
+
 #### Arrange
 
 With Arrange a DataFrame can be sorted by the given column names:
@@ -352,7 +364,18 @@ if a.Err != nil {
     log.Fatal("Oh noes!")
 }
 ```
+#### Save a dataframe to file
+with using `WriteCSV` you can write a dataframe to a csv file. 
 
+```
+file, err := os.Create("output.csv")
+// Create file
+defer file.Close()
+if err != nil {
+	log.Fatal(err)
+}
+df.WriteCSV(file)
+```
 #### Print to console
 
 ```go
