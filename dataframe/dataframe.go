@@ -16,6 +16,7 @@ import (
 	"github.com/dreamsxin/gota/series"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
+	"gonum.org/v1/gonum/mat"
 )
 
 // DataFrame is a data structure designed for operating on table like data (Such
@@ -1614,6 +1615,16 @@ func (df DataFrame) Nrow() int {
 // Ncol returns the number of columns on a DataFrame.
 func (df DataFrame) Ncol() int {
 	return df.ncols
+}
+
+func (df DataFrame) At(i, j int) float64 {
+	return df.Elem(i, j).Float()
+}
+
+func (df DataFrame) T() mat.Matrix {
+	return mat.Transpose{
+		Matrix: df,
+	}
 }
 
 // Col returns a copy of the Series with the given column name contained in the DataFrame.
