@@ -125,7 +125,7 @@ func Add(a series.Series, b series.Series) series.Series {
 		if la >= lb {
 			av := a.Int64()
 			for i, v := range b.Int64() {
-				c.Append(av[i] - v)
+				c.Append(av[i] + v)
 			}
 		} else {
 			bv := a.Int64()

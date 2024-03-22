@@ -41,7 +41,7 @@ type DataFrame struct {
 
 // New is the generic DataFrame constructor
 func New(se ...series.Series) DataFrame {
-	if se == nil || len(se) == 0 {
+	if len(se) == 0 {
 		return DataFrame{Err: fmt.Errorf("empty DataFrame")}
 	}
 
@@ -660,7 +660,7 @@ func (df DataFrame) Mutate(s series.Series) DataFrame {
 		return df
 	}
 	if s.Len() != df.nrows {
-		return DataFrame{Err: fmt.Errorf("mutate: wrong dimensions")}
+		return DataFrame{Err: fmt.Errorf("mutate: %s wrong dimensions", s.Name)}
 	}
 	df = df.Copy()
 	// Check that colname exist on dataframe
@@ -1629,6 +1629,24 @@ func (df DataFrame) Col(colname string) series.Series {
 	return df.columns[idx].Copy()
 }
 
+func (df DataFrame) FillNaN(colname string, value series.Series) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	// Check that colname exist on dataframe
+	idx := findInStringSlice(colname, df.Names())
+	if idx < 0 {
+		s := series.New(value, value.Type(), colname)
+		for i := 1; i < df.nrows; i++ {
+			s.Append(value)
+		}
+
+		return df.Mutate(s)
+	}
+	df.columns[idx].FillNaN(value)
+	return df
+}
+
 // InnerJoin returns a DataFrame containing the inner join of two DataFrames.
 func (df DataFrame) InnerJoin(b DataFrame, keys ...string) DataFrame {
 	if len(keys) == 0 {
@@ -2099,13 +2117,17 @@ func (df DataFrame) Records() [][]string {
 }
 
 // Maps return the array of maps representation of a DataFrame.
-func (df DataFrame) Maps() []map[string]interface{} {
+func (df DataFrame) Maps(funcs ...func(series.Type, interface{}) interface{}) []map[string]interface{} {
 	maps := make([]map[string]interface{}, df.nrows)
 	colnames := df.Names()
 	for i := 0; i < df.nrows; i++ {
 		m := make(map[string]interface{})
 		for k, v := range colnames {
+			s := df.columns[k]
 			val := df.columns[k].Val(i)
+			for _, f := range funcs {
+				val = f(s.Type(), val)
+			}
 			m[v] = val
 		}
 		maps[i] = m
