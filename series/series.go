@@ -242,6 +242,25 @@ func (s *Series) Error() error {
 	return s.Err
 }
 
+func (s *Series) Fill(num int, values interface{}) {
+	if err := s.Err; err != nil {
+		return
+	}
+	news := New(values, s.t, s.Name)
+	for i := s.elements.Len(); i < num; i++ {
+		switch s.t {
+		case String:
+			s.elements = append(s.elements.(stringElements), news.elements.(stringElements)...)
+		case Int:
+			s.elements = append(s.elements.(intElements), news.elements.(intElements)...)
+		case Float:
+			s.elements = append(s.elements.(floatElements), news.elements.(floatElements)...)
+		case Bool:
+			s.elements = append(s.elements.(boolElements), news.elements.(boolElements)...)
+		}
+	}
+}
+
 // Append adds new elements to the end of the Series. When using Append, the
 // Series is modified in place.
 func (s *Series) Append(values interface{}) {
