@@ -103,6 +103,7 @@ const (
 	Less      Comparator = "<"    // Lesser than
 	LessEq    Comparator = "<="   // Lesser or equal than
 	In        Comparator = "in"   // Inside
+	Out       Comparator = "out"  // Outside
 	CompFunc  Comparator = "func" // user-defined comparison function
 )
 
@@ -444,7 +445,7 @@ func (s Series) Compare(comparator Comparator, comparando interface{}) Series {
 
 	comp := New(comparando, s.t, "")
 	// In comparator comparison
-	if comparator == In {
+	if comparator == In { // Inside
 		for i := 0; i < s.Len(); i++ {
 			e := s.elements.Elem(i)
 			b := false
@@ -458,6 +459,28 @@ func (s Series) Compare(comparator Comparator, comparando interface{}) Series {
 				}
 				if c {
 					b = true
+					break
+				}
+			}
+			bools[i] = b
+		}
+		return Bools(bools)
+	}
+
+	if comparator == Out { // Outside
+		for i := 0; i < s.Len(); i++ {
+			e := s.elements.Elem(i)
+			b := true
+			for j := 0; j < comp.Len(); j++ {
+				m := comp.elements.Elem(j)
+				c, err := compareElements(e, m, Eq)
+				if err != nil {
+					s = s.Empty()
+					s.Err = err
+					return s
+				}
+				if c {
+					b = false
 					break
 				}
 			}

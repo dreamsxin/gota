@@ -227,6 +227,7 @@ Filtering is based on predefined comparison operators:
 * `series.Less`
 * `series.LessEq`
 * `series.In`
+* `series.Out`
 
 However, if these filter operations are not sufficient, we can use user-defined comparators.
 We use `series.CompFunc` and a user-defined function with the signature `func(series.Element) bool` to provide user-defined filters to `df.Filter` and `df.FilterAggregation`.
