@@ -2577,6 +2577,22 @@ func TestDataFrame_String(t *testing.T) {
 	}
 }
 
+func TestDataFrame_Show(t *testing.T) {
+	a := LoadRecords(
+		[][]string{
+			{"A", "C", "D"},
+			{"1", "5.1", "true"},
+			{"NaN", "6.0", "true"},
+			{"2", "6.0", "false"},
+			{"2", "7.1", "false"},
+		},
+	)
+	err := a.Show()
+	if err != nil {
+		t.Errorf("Show err: \n%v\n", err)
+	}
+}
+
 func TestDataFrame_Rapply(t *testing.T) {
 	a := LoadRecords(
 		[][]string{

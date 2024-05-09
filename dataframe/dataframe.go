@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/dreamsxin/gota/series"
+	"github.com/olekukonko/tablewriter"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 	"gonum.org/v1/gonum/mat"
@@ -109,6 +111,22 @@ func (df DataFrame) String() (str string) {
 // Returns error or nil if no error occured
 func (df *DataFrame) Error() error {
 	return df.Err
+}
+
+func (df DataFrame) Show() error {
+	table := tablewriter.NewWriter(os.Stdout)
+
+	records := df.Records()
+
+	if len(records) <= 0 {
+		return fmt.Errorf("no records to show")
+	}
+	table.SetHeader(records[0])
+
+	table.AppendBulk(records[1:])
+
+	table.Render()
+	return nil
 }
 
 func (df DataFrame) Print(shortRows, shortCols, showDims, showTypes bool) (str string) {
