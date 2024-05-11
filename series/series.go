@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"math"
 
@@ -54,6 +55,7 @@ type Element interface {
 	Int64() (int64, error)
 	Float() float64
 	Bool() (bool, error)
+	Time() (time.Time, error)
 
 	// Information methods
 	IsNA() bool
@@ -83,6 +85,12 @@ type boolElements []boolElement
 
 func (e boolElements) Len() int           { return len(e) }
 func (e boolElements) Elem(i int) Element { return &e[i] }
+
+// timeElement is the concrete implementation of Elements for time elements.
+type timeElements []timeElement
+
+func (e timeElements) Len() int           { return len(e) }
+func (e timeElements) Elem(i int) Element { return &e[i] }
 
 // ElementValue represents the value that can be used for marshaling or
 // unmarshaling Elements.
@@ -120,6 +128,7 @@ const (
 	Int    Type = "int"
 	Float  Type = "float"
 	Bool   Type = "bool"
+	Time   Type = "time"
 )
 
 // Indexes represent the elements that can be used for selecting a subset of
@@ -150,6 +159,8 @@ func New(values interface{}, t Type, name string) Series {
 			ret.elements = make(floatElements, n)
 		case Bool:
 			ret.elements = make(boolElements, n)
+		case Time:
+			ret.elements = make(timeElements, n)
 		default:
 			panic(fmt.Sprintf("unknown type %v", t))
 		}
@@ -231,6 +242,11 @@ func Floats(values interface{}) Series {
 // Bools is a constructor for a Bool Series
 func Bools(values interface{}) Series {
 	return New(values, Bool, "")
+}
+
+// Times is a constructor for a Time Series
+func Times(values interface{}) Series {
+	return New(values, Time, "")
 }
 
 // Empty returns an empty Series of the same type

@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type stringElement struct {
@@ -108,6 +109,14 @@ func (e stringElement) Bool() (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("can't convert String \"%v\" to bool", e.e)
+}
+
+func (e stringElement) Time() (time.Time, error) {
+	t, err := time.ParseInLocation(time.RFC3339, e.e, time.Local)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return t, nil
 }
 
 func (e stringElement) Eq(elem Element) bool {
