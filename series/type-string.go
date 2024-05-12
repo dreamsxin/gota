@@ -36,6 +36,8 @@ func (e *stringElement) Set(value interface{}) {
 		} else {
 			e.e = "false"
 		}
+	case time.Time:
+		e.e = val.Format(time.RFC3339)
 	case Element:
 		e.e = val.String()
 	default:

@@ -34,6 +34,8 @@ func (e *timeElement) Set(value interface{}) {
 		e.e = time.Unix(int64(val), 0)
 	case float64:
 		e.e = time.Unix(int64(val), 0)
+	case time.Time:
+		e.e = val
 	case Element:
 		e.e, _ = val.Time()
 	default:

@@ -40,6 +40,12 @@ func (e *floatElement) Set(value interface{}) {
 		} else {
 			e.e = 0
 		}
+	case time.Time:
+		if val.IsZero() {
+			e.e = 0
+		} else {
+			e.e = float64(val.Unix())
+		}
 	case Element:
 		e.e = val.Float()
 	default:

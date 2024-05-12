@@ -1241,6 +1241,8 @@ func parseType(s string) (series.Type, error) {
 		return series.String, nil
 	case "bool":
 		return series.Bool, nil
+	case "time", "time.Time":
+		return series.Time, nil
 	}
 	return "", fmt.Errorf("type (%s) is not supported", s)
 }

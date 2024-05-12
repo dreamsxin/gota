@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"math"
 
@@ -2837,6 +2838,83 @@ func TestLoadStructs(t *testing.T) {
 				series.New([]float64{1, 2}, series.Float, "B"),
 				series.New([]bool{true, true}, series.Bool, "C"),
 				series.New([]string{"0", "0.5"}, series.Float, "D"),
+			),
+		},
+	}
+	for i, tc := range table {
+		if tc.b.Err != nil {
+			t.Errorf("Test: %d\nError:%v", i, tc.b.Err)
+		}
+		// Check that the types are the same between both DataFrames
+		if !reflect.DeepEqual(tc.expDf.Types(), tc.b.Types()) {
+			t.Errorf("Test: %d\nDifferent types:\nA:%v\nB:%v", i, tc.expDf.Types(), tc.b.Types())
+		}
+		// Check that the colnames are the same between both DataFrames
+		if !reflect.DeepEqual(tc.expDf.Names(), tc.b.Names()) {
+			t.Errorf("Test: %d\nDifferent colnames:\nA:%v\nB:%v", i, tc.expDf.Names(), tc.b.Names())
+		}
+		// Check that the values are the same between both DataFrames
+		if !reflect.DeepEqual(tc.expDf.Records(), tc.b.Records()) {
+			t.Errorf("Test: %d: Different values:\nA:%v\nB:%v", i, tc.expDf, tc.b)
+		}
+	}
+}
+
+func TestLoadStructsWithTime(t *testing.T) {
+	type testStruct struct {
+		A time.Time
+	}
+	type testStructTags struct {
+		A time.Time `dataframe:"a,time"`
+	}
+	timev1 := time.Time{}
+	timev2 := time.Date(2023, time.March, 25, 15, 30, 0, 0, time.UTC)
+	times1 := "0001-01-01T00:00:00Z"
+	times2 := "2023-03-25T15:30:00Z"
+	data := []testStruct{
+		{timev1},
+		{timev2},
+	}
+	dataTags := []testStructTags{
+		{timev1},
+		{timev2},
+	}
+	table := []struct {
+		b     DataFrame
+		expDf DataFrame
+	}{
+		{
+			LoadStructs(data),
+			New(
+				series.New([]time.Time{timev1, timev2}, series.Time, "A"),
+			),
+		},
+		{
+			LoadStructs(dataTags),
+			New(
+				series.New([]time.Time{timev1, timev2}, series.Time, "a"),
+			),
+		},
+		{
+			LoadStructs(
+				data,
+				HasHeader(true),
+				DetectTypes(false),
+				DefaultType(series.String),
+			),
+			New(
+				series.New([]time.Time{timev1, timev2}, series.String, "A"),
+			),
+		},
+		{
+			LoadStructs(
+				data,
+				HasHeader(false),
+				DetectTypes(false),
+				DefaultType(series.String),
+			),
+			New(
+				series.New([]string{"A", times1, times2}, series.String, "X0"),
 			),
 		},
 	}

@@ -54,6 +54,12 @@ func (e *boolElement) Set(value interface{}) {
 		}
 	case bool:
 		e.e = val
+	case time.Time:
+		if val.IsZero() {
+			e.e = false
+		} else {
+			e.e = true
+		}
 	case Element:
 		b, err := value.(Element).Bool()
 		if err != nil {

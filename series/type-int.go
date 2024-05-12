@@ -49,6 +49,12 @@ func (e *intElement) Set(value interface{}) {
 		} else {
 			e.e = 0
 		}
+	case time.Time:
+		if val.IsZero() {
+			e.e = 0
+		} else {
+			e.e = val.Unix()
+		}
 	case Element:
 		v, err := val.Int64()
 		if err != nil {
