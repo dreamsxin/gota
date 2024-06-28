@@ -2937,6 +2937,60 @@ func TestLoadStructsWithTime(t *testing.T) {
 	}
 }
 
+func TestLoadStructsWithSkipNames(t *testing.T) {
+	type testStruct struct {
+		A string
+		B string
+		C string
+		D string
+	}
+	data := []testStruct{
+		{"a1", "b1", "c1", "d1"},
+	}
+	table := []struct {
+		b     DataFrame
+		expDf DataFrame
+	}{
+		{
+			LoadStructs(data),
+			New(
+				series.New("a1", series.String, "A"),
+				series.New("b1", series.String, "B"),
+				series.New("c1", series.String, "C"),
+				series.New("d1", series.String, "D"),
+			),
+		},
+		{
+			LoadStructs(
+				data,
+				WithSkipColNames(map[string]string{"C": "C"}),
+			),
+			New(
+				series.New("a1", series.String, "A"),
+				series.New("b1", series.String, "B"),
+				series.New("d1", series.String, "D"),
+			),
+		},
+	}
+	for i, tc := range table {
+		if tc.b.Err != nil {
+			t.Errorf("Test: %d\nError:%v", i, tc.b.Err)
+		}
+		// Check that the types are the same between both DataFrames
+		if !reflect.DeepEqual(tc.expDf.Types(), tc.b.Types()) {
+			t.Errorf("Test: %d\nDifferent types:\nA:%v\nB:%v", i, tc.expDf.Types(), tc.b.Types())
+		}
+		// Check that the colnames are the same between both DataFrames
+		if !reflect.DeepEqual(tc.expDf.Names(), tc.b.Names()) {
+			t.Errorf("Test: %d\nDifferent colnames:\nA:%v\nB:%v", i, tc.expDf.Names(), tc.b.Names())
+		}
+		// Check that the values are the same between both DataFrames
+		if !reflect.DeepEqual(tc.expDf.Records(), tc.b.Records()) {
+			t.Errorf("Test: %d: Different values:\nA:%v\nB:%v", i, tc.expDf, tc.b)
+		}
+	}
+}
+
 func TestDescribe(t *testing.T) {
 	table := []struct {
 		df       DataFrame
