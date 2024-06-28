@@ -1029,6 +1029,12 @@ type loadOptions struct {
 
 	// The types of specific columns can be specified via column name.
 	types map[string]series.Type
+
+	// Defines which col names are going to be skipped when load from stucts.
+	skipColNames map[string]string
+
+	// Defines which col idx are going to be skipped when load from slice.
+	skipColIdxs map[int]int
 }
 
 // DefaultType sets the defaultType option for loadOptions.
@@ -1091,6 +1097,19 @@ func WithLazyQuotes(b bool) LoadOption {
 func WithComments(b rune) LoadOption {
 	return func(c *loadOptions) {
 		c.comment = b
+	}
+}
+
+// WithSkipCol
+func WithSkipColNames(m map[string]string) LoadOption {
+	return func(c *loadOptions) {
+		c.skipColNames = m
+	}
+}
+
+func WithSkipColIdxs(m map[int]int) LoadOption {
+	return func(c *loadOptions) {
+		c.skipColIdxs = m
 	}
 }
 
@@ -1165,6 +1184,12 @@ func LoadStructs(i interface{}, options ...LoadOption) DataFrame {
 			field := val.Index(0).Type().Field(j)
 			fieldName := field.Name
 			fieldType := field.Type.String()
+
+			if cfg.skipColNames != nil {
+				if _, ok := cfg.skipColNames[fieldName]; ok {
+					continue
+				}
+			}
 
 			// Process struct tags
 			fieldTags := field.Tag.Get("dataframe")
