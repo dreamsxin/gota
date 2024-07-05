@@ -4,6 +4,55 @@ import (
 	"github.com/dreamsxin/gota/series"
 )
 
+type Type string
+
+const (
+	TypeMul Type = "mul"
+	TypeDiv Type = "div"
+	TypeSub Type = "Sub"
+	TypeAdd Type = "Add"
+)
+
+type Mode string
+
+const (
+	ModeNone Mode = "none"
+	ModeZero Mode = "zero"
+	ModeOne  Mode = "one"
+)
+
+func Cal(a series.Series, b series.Series, op Type, mod Mode) series.Series {
+	var c series.Series
+	la := a.Len()
+	lb := b.Len()
+	switch mod {
+	case ModeZero:
+		if la > lb {
+			b.Fill(la, 0)
+		} else if la < lb {
+			a.Fill(lb, 0)
+		}
+	case ModeOne:
+		if la > lb {
+			b.Fill(la, 1)
+		} else if la < lb {
+			a.Fill(lb, 1)
+		}
+	}
+
+	switch op {
+	case TypeMul:
+		c = Mul(a, b)
+	case TypeDiv:
+		c = Div(a, b)
+	case TypeSub:
+		c = Sub(a, b)
+	case TypeAdd:
+		c = Add(a, b)
+	}
+	return c
+}
+
 func Mul(a series.Series, b series.Series) series.Series {
 	var c series.Series
 	la := a.Len()
