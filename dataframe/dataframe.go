@@ -851,7 +851,7 @@ func (df DataFrame) Arrange(order ...Order) DataFrame {
 	// Check that all colnames exist before starting to sort
 	for i := 0; i < len(order); i++ {
 		colname := order[i].Colname
-		if df.colIndex(colname) == -1 {
+		if df.ColIndex(colname) == -1 {
 			return DataFrame{Err: fmt.Errorf("colname %s doesn't exist", colname)}
 		}
 	}
@@ -874,7 +874,7 @@ func (df DataFrame) Arrange(order ...Order) DataFrame {
 	suborder := origIdx
 	for i := len(order) - 1; i >= 0; i-- {
 		colname := order[i].Colname
-		idx := df.colIndex(colname)
+		idx := df.ColIndex(colname)
 		nextSeries := df.columns[idx].Subset(suborder)
 		suborder = nextSeries.Order(order[i].Reverse)
 		swapOrigIdx(suborder)
@@ -1741,12 +1741,12 @@ func (df DataFrame) InnerJoin(b DataFrame, keys ...string) DataFrame {
 	var iKeysB []int
 	var errorArr []string
 	for _, key := range keys {
-		i := df.colIndex(key)
+		i := df.ColIndex(key)
 		if i < 0 {
 			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on left DataFrame", key))
 		}
 		iKeysA = append(iKeysA, i)
-		j := b.colIndex(key)
+		j := b.ColIndex(key)
 		if j < 0 {
 			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on right DataFrame", key))
 		}
@@ -1820,12 +1820,12 @@ func (df DataFrame) LeftJoin(b DataFrame, keys ...string) DataFrame {
 	var iKeysB []int
 	var errorArr []string
 	for _, key := range keys {
-		i := df.colIndex(key)
+		i := df.ColIndex(key)
 		if i < 0 {
 			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on left DataFrame", key))
 		}
 		iKeysA = append(iKeysA, i)
-		j := b.colIndex(key)
+		j := b.ColIndex(key)
 		if j < 0 {
 			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on right DataFrame", key))
 		}
@@ -1918,12 +1918,12 @@ func (df DataFrame) RightJoin(b DataFrame, keys ...string) DataFrame {
 	var iKeysB []int
 	var errorArr []string
 	for _, key := range keys {
-		i := df.colIndex(key)
+		i := df.ColIndex(key)
 		if i < 0 {
 			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on left DataFrame", key))
 		}
 		iKeysA = append(iKeysA, i)
-		j := b.colIndex(key)
+		j := b.ColIndex(key)
 		if j < 0 {
 			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on right DataFrame", key))
 		}
@@ -2026,12 +2026,12 @@ func (df DataFrame) OuterJoin(b DataFrame, keys ...string) DataFrame {
 	var iKeysB []int
 	var errorArr []string
 	for _, key := range keys {
-		i := df.colIndex(key)
+		i := df.ColIndex(key)
 		if i < 0 {
 			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on left DataFrame", key))
 		}
 		iKeysA = append(iKeysA, i)
-		j := b.colIndex(key)
+		j := b.ColIndex(key)
 		if j < 0 {
 			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on right DataFrame", key))
 		}
@@ -2174,9 +2174,9 @@ func (df DataFrame) CrossJoin(b DataFrame) DataFrame {
 	return New(newCols...)
 }
 
-// colIndex returns the index of the column with name `s`. If it fails to find the
+// ColIndex returns the index of the column with name `s`. If it fails to find the
 // column it returns -1 instead.
-func (df DataFrame) colIndex(s string) int {
+func (df DataFrame) ColIndex(s string) int {
 	for k, v := range df.Names() {
 		if v == s {
 			return k
@@ -2217,6 +2217,23 @@ func (df DataFrame) Maps(funcs ...func(series.Type, interface{}) interface{}) []
 		maps[i] = m
 	}
 	return maps
+}
+
+func (df DataFrame) GetRow(r int, funcs ...func(series.Type, interface{}) interface{}) (m map[string]interface{}) {
+	if r >= df.nrows {
+		return
+	}
+	m = make(map[string]interface{})
+	colnames := df.Names()
+	for k, v := range colnames {
+		s := df.columns[k]
+		val := df.columns[k].Val(r)
+		for _, f := range funcs {
+			val = f(s.Type(), val)
+		}
+		m[v] = val
+	}
+	return
 }
 
 // Elem returns the element on row `r` and column `c`. Will panic if the index is

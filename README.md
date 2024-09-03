@@ -137,6 +137,13 @@ jsonStr := `[{"COL.2":1,"COL.3":3},{"COL.1":5,"COL.2":2,"COL.3":2},{"COL.1":6,"C
 df := dataframe.ReadJSON(strings.NewReader(jsonStr))
 ```
 
+#### Get row data
+
+
+```go
+row := df.GetRow(0)
+```
+
 #### Subsetting
 
 We can subset our DataFrames with the Subset method. For example if we

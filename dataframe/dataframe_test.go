@@ -2991,6 +2991,20 @@ func TestLoadStructsWithSkipNames(t *testing.T) {
 	}
 }
 
+func TestGetRow(t *testing.T) {
+	df := LoadRecords(
+		[][]string{
+			{"Date"},
+			{"2024-09-03 23:00:00", "4", "5.1", "true"},
+		})
+	row := df.GetRow(0)
+	received := row["Date"].(string)
+	expected := "2024-09-03 23:00:00"
+	if expected != received {
+		t.Errorf("Expected:\n%v\nReceived:\n%v\n", expected, received)
+	}
+}
+
 func TestDescribe(t *testing.T) {
 	table := []struct {
 		df       DataFrame
