@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/dreamsxin/gota/series"
@@ -2376,7 +2377,7 @@ func parseSelectIndexes(l int, indexes SelectIndexes, colnames []string) ([]int,
 }
 
 func findType(arr []string) (series.Type, error) {
-	var hasFloats, hasInts, hasBools, hasStrings bool
+	var hasFloats, hasInts, hasBools, hasTimes, hasStrings bool
 	for _, str := range arr {
 		if str == "" || str == "NaN" {
 			continue
@@ -2387,6 +2388,10 @@ func findType(arr []string) (series.Type, error) {
 		}
 		if _, err := strconv.ParseFloat(str, 64); err == nil {
 			hasFloats = true
+			continue
+		}
+		if _, err := time.ParseInLocation(time.RFC3339, str, time.Local); err == nil {
+			hasTimes = true
 			continue
 		}
 		if str == "true" || str == "false" {
@@ -2405,6 +2410,8 @@ func findType(arr []string) (series.Type, error) {
 		return series.Float, nil
 	case hasInts:
 		return series.Int, nil
+	case hasTimes:
+		return series.Time, nil
 	default:
 		return series.String, fmt.Errorf("couldn't detect type")
 	}
