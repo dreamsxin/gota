@@ -164,7 +164,7 @@ func Add(a series.Series, b series.Series) series.Series {
 				c.Append(av[i] + v)
 			}
 		} else {
-			bv := a.Float()
+			bv := b.Float()
 			for i, v := range a.Float() {
 				c.Append(v + bv[i])
 			}
@@ -177,7 +177,7 @@ func Add(a series.Series, b series.Series) series.Series {
 				c.Append(av[i] + v)
 			}
 		} else {
-			bv := a.Int64()
+			bv := b.Int64()
 			for i, v := range a.Int64() {
 				c.Append(v + bv[i])
 			}
