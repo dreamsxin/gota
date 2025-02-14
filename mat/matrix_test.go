@@ -90,3 +90,31 @@ func TestMatrix_Cal(t *testing.T) {
 		}
 	}
 }
+
+func TestMatrix_Add(t *testing.T) {
+	table := []struct {
+		a        series.Series
+		b        series.Series
+		expected series.Series
+	}{
+		{
+			series.Floats([]float64{0, 2, 1, 5, 9}),
+			series.Floats([]float64{0, 1, 2, 2}),
+			series.Floats([]float64{0, 3, 3, 7, 9}),
+		},
+	}
+	for testnum, test := range table {
+		a := test.a
+		b := test.b
+
+		expected := test.expected.Records()
+		received := Add(a, b).Records()
+		t.Log(received)
+		if !reflect.DeepEqual(expected, received) {
+			t.Errorf(
+				"Test:%v\nExpected:\n%v\nReceived:\n%v",
+				testnum, expected, received,
+			)
+		}
+	}
+}

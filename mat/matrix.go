@@ -159,27 +159,43 @@ func Add(a series.Series, b series.Series) series.Series {
 	case series.Float:
 		c = series.Floats([]float64{})
 		if la >= lb {
-			av := a.Float()
-			for i, v := range b.Float() {
-				c.Append(av[i] + v)
-			}
-		} else {
 			bv := b.Float()
 			for i, v := range a.Float() {
+				if i >= lb {
+					c.Append(v)
+					continue
+				}
 				c.Append(v + bv[i])
+			}
+		} else {
+			av := a.Float()
+			for i, v := range b.Float() {
+				if i >= la {
+					c.Append(v)
+					continue
+				}
+				c.Append(av[i] + v)
 			}
 		}
 	default:
 		c = series.Ints([]int64{})
 		if la >= lb {
-			av := a.Int64()
-			for i, v := range b.Int64() {
-				c.Append(av[i] + v)
-			}
-		} else {
 			bv := b.Int64()
 			for i, v := range a.Int64() {
+				if i >= lb {
+					c.Append(v)
+					continue
+				}
 				c.Append(v + bv[i])
+			}
+		} else {
+			av := a.Int64()
+			for i, v := range b.Int64() {
+				if i >= la {
+					c.Append(v)
+					continue
+				}
+				c.Append(av[i] + v)
 			}
 		}
 	}
