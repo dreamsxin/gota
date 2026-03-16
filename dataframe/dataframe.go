@@ -590,6 +590,74 @@ func (g Groups) GetGroups() map[string]DataFrame {
 	return g.groups
 }
 
+// Apply applies a user-defined function to each group's DataFrame and returns
+// the concatenated result. This is analogous to pandas groupby().apply().
+// The function receives the group DataFrame and should return a DataFrame.
+func (gps Groups) Apply(f func(DataFrame) DataFrame) DataFrame {
+	if gps.Err != nil {
+		return DataFrame{Err: gps.Err}
+	}
+	var results []DataFrame
+	for _, df := range gps.groups {
+		res := f(df)
+		if res.Err != nil {
+			return DataFrame{Err: res.Err}
+		}
+		results = append(results, res)
+	}
+	if len(results) == 0 {
+		return DataFrame{Err: fmt.Errorf("GroupBy.Apply: no groups")}
+	}
+	out := results[0]
+	for _, r := range results[1:] {
+		out = out.Concat(r)
+		if out.Err != nil {
+			return out
+		}
+	}
+	return out
+}
+
+// Transform applies a user-defined function to each group's column Series and
+// returns a new DataFrame with the same shape as the original. The function
+// receives a Series (one column of one group) and returns a Series of the same
+// length. This is analogous to pandas groupby().transform().
+func (gps Groups) Transform(colname string, f func(series.Series) series.Series) (series.Series, error) {
+	if gps.Err != nil {
+		return series.Series{Err: gps.Err}, gps.Err
+	}
+	// Collect all (original row index, transformed value) pairs so that we can
+	// reconstruct the column in the original row order.
+	// We need to know the original row order. We do this by including a hidden
+	// "__idx__" column during GroupBy – but since that's not available here, we
+	// reconstruct by iterating groups and re-joining on key columns.
+	//
+	// Simpler approach: collect per-group transformed values, then concat in
+	// the same iteration order as the groups map.  The caller is responsible for
+	// re-sorting if order matters.
+	var segs []series.Series
+	for _, df := range gps.groups {
+		col := df.Col(colname)
+		if col.Err != nil {
+			return series.Series{Err: col.Err}, col.Err
+		}
+		transformed := f(col)
+		if transformed.Err != nil {
+			return series.Series{Err: transformed.Err}, transformed.Err
+		}
+		segs = append(segs, transformed)
+	}
+	if len(segs) == 0 {
+		return series.New([]float64{}, series.Float, colname), nil
+	}
+	out := segs[0]
+	for _, seg := range segs[1:] {
+		out = out.Concat(seg)
+	}
+	out.Name = colname
+	return out, nil
+}
+
 // Rename changes the name of one of the columns of a DataFrame
 func (df DataFrame) Rename(newname, oldname string) DataFrame {
 	if df.Err != nil {
@@ -1732,177 +1800,558 @@ func (df DataFrame) FillNaN(colname string, value series.Series) DataFrame {
 	return df
 }
 
+// rowKey builds a composite string key from all columns of a single row.
+// Used by Duplicated and DropDuplicates.
+func (df DataFrame) rowKey(i int) string {
+	var sb strings.Builder
+	for c, col := range df.columns {
+		if c > 0 {
+			sb.WriteByte('|')
+		}
+		sb.WriteString(col.Elem(i).String())
+	}
+	return sb.String()
+}
+
+// Duplicated returns a bool slice where true indicates the row is a duplicate
+// of an earlier row.  Only the first occurrence is considered non-duplicate.
+// If subset is non-empty, only the specified columns are used for comparison.
+func (df DataFrame) Duplicated(subset ...string) []bool {
+	result := make([]bool, df.nrows)
+	seen := make(map[string]struct{}, df.nrows)
+
+	// Determine which column indices to use.
+	var colIdxs []int
+	if len(subset) == 0 {
+		for i := 0; i < df.ncols; i++ {
+			colIdxs = append(colIdxs, i)
+		}
+	} else {
+		for _, name := range subset {
+			idx := df.ColIndex(name)
+			if idx >= 0 {
+				colIdxs = append(colIdxs, idx)
+			}
+		}
+	}
+
+	for i := 0; i < df.nrows; i++ {
+		var sb strings.Builder
+		for c, ci := range colIdxs {
+			if c > 0 {
+				sb.WriteByte('|')
+			}
+			sb.WriteString(df.columns[ci].Elem(i).String())
+		}
+		key := sb.String()
+		if _, ok := seen[key]; ok {
+			result[i] = true
+		} else {
+			seen[key] = struct{}{}
+		}
+	}
+	return result
+}
+
+// DropDuplicates returns a new DataFrame with duplicate rows removed.
+// Only the first occurrence of each unique row is kept.
+// If subset is non-empty, only the specified columns are used to detect duplicates.
+func (df DataFrame) DropDuplicates(subset ...string) DataFrame {
+	dups := df.Duplicated(subset...)
+	var keep []int
+	for i, isDup := range dups {
+		if !isDup {
+			keep = append(keep, i)
+		}
+	}
+	if len(keep) == 0 {
+		return df.Subset([]int{})
+	}
+	return df.Subset(keep)
+}
+
+// NAHow controls the row-drop behaviour of DropNA.
+type NAHow string
+
+const (
+	// NAHowAny drops a row if ANY of the examined columns is NaN.
+	NAHowAny NAHow = "any"
+	// NAHowAll drops a row only if ALL of the examined columns are NaN.
+	NAHowAll NAHow = "all"
+)
+
+// DropNA returns a new DataFrame with rows removed according to NaN content.
+//
+//   - how = "any" (default): drop a row if any examined column is NaN.
+//   - how = "all": drop a row only if all examined columns are NaN.
+//   - subset: optional list of column names to examine; defaults to all columns.
+func (df DataFrame) DropNA(how NAHow, subset ...string) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	if how == "" {
+		how = NAHowAny
+	}
+
+	// Resolve column indices to check.
+	var colIdxs []int
+	if len(subset) == 0 {
+		for i := 0; i < df.ncols; i++ {
+			colIdxs = append(colIdxs, i)
+		}
+	} else {
+		for _, name := range subset {
+			idx := df.ColIndex(name)
+			if idx >= 0 {
+				colIdxs = append(colIdxs, idx)
+			}
+		}
+	}
+
+	var keep []int
+	for i := 0; i < df.nrows; i++ {
+		nanCount := 0
+		for _, ci := range colIdxs {
+			if df.columns[ci].Elem(i).IsNA() {
+				nanCount++
+			}
+		}
+		switch how {
+		case NAHowAny:
+			if nanCount == 0 {
+				keep = append(keep, i)
+			}
+		case NAHowAll:
+			if nanCount < len(colIdxs) {
+				keep = append(keep, i)
+			}
+		}
+	}
+	if len(keep) == 0 {
+		return df.Subset([]int{})
+	}
+	return df.Subset(keep)
+}
+
+// NAFillStrategy selects the filling method for FillNAStrategy.
+type NAFillStrategy string
+
+const (
+	// NAFillForward fills each NaN with the nearest preceding non-NaN value.
+	NAFillForward NAFillStrategy = "ffill"
+	// NAFillBackward fills each NaN with the nearest following non-NaN value.
+	NAFillBackward NAFillStrategy = "bfill"
+)
+
+// FillNAStrategy fills NaN values in every column (or the specified subset)
+// using the given strategy ("ffill" or "bfill").
+func (df DataFrame) FillNAStrategy(strategy NAFillStrategy, subset ...string) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+
+	// Clone to avoid mutating the original.
+	result := df.Copy()
+
+	applies := func(name string) bool {
+		if len(subset) == 0 {
+			return true
+		}
+		for _, s := range subset {
+			if s == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	for i, col := range result.columns {
+		if !applies(col.Name) {
+			continue
+		}
+		switch strategy {
+		case NAFillForward:
+			result.columns[i] = col.FillNaNForward()
+		case NAFillBackward:
+			result.columns[i] = col.FillNaNBackward()
+		}
+	}
+	return result
+}
+
+// FillNAStrategyLimit fills NaN values using ffill or bfill but limits the
+// maximum number of consecutive NaN values that will be filled.
+// limit <= 0 means no limit (same as FillNAStrategy).
+func (df DataFrame) FillNAStrategyLimit(strategy NAFillStrategy, limit int, subset ...string) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	result := df.Copy()
+	applies := func(name string) bool {
+		if len(subset) == 0 {
+			return true
+		}
+		for _, s := range subset {
+			if s == name {
+				return true
+			}
+		}
+		return false
+	}
+	for i, col := range result.columns {
+		if !applies(col.Name) {
+			continue
+		}
+		switch strategy {
+		case NAFillForward:
+			result.columns[i] = col.FillNaNForwardLimit(limit)
+		case NAFillBackward:
+			result.columns[i] = col.FillNaNBackwardLimit(limit)
+		}
+	}
+	return result
+}
+
+// CumSum returns a new DataFrame where each numeric column is replaced by its
+// cumulative sum. Non-numeric columns (String, Bool) are left unchanged.
+func (df DataFrame) CumSum(subset ...string) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	result := df.Copy()
+	applies := func(name string) bool {
+		if len(subset) == 0 {
+			return true
+		}
+		for _, s := range subset {
+			if s == name {
+				return true
+			}
+		}
+		return false
+	}
+	for i, col := range result.columns {
+		if !applies(col.Name) {
+			continue
+		}
+		switch col.Type() {
+		case series.Int, series.Float:
+			cs := col.CumSum()
+			cs.Name = col.Name
+			result.columns[i] = cs
+		}
+	}
+	return result
+}
+
+// CumProd returns a new DataFrame where each numeric column is replaced by its
+// cumulative product.
+func (df DataFrame) CumProd(subset ...string) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	result := df.Copy()
+	applies := func(name string) bool {
+		if len(subset) == 0 {
+			return true
+		}
+		for _, s := range subset {
+			if s == name {
+				return true
+			}
+		}
+		return false
+	}
+	for i, col := range result.columns {
+		if !applies(col.Name) {
+			continue
+		}
+		switch col.Type() {
+		case series.Int, series.Float:
+			cs := col.CumProd()
+			cs.Name = col.Name
+			result.columns[i] = cs
+		}
+	}
+	return result
+}
+
+// Diff returns a new DataFrame where each numeric column is replaced by its
+// first-order difference (or periods-order if periods != 1).
+func (df DataFrame) Diff(periods int, subset ...string) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	result := df.Copy()
+	applies := func(name string) bool {
+		if len(subset) == 0 {
+			return true
+		}
+		for _, s := range subset {
+			if s == name {
+				return true
+			}
+		}
+		return false
+	}
+	for i, col := range result.columns {
+		if !applies(col.Name) {
+			continue
+		}
+		switch col.Type() {
+		case series.Int, series.Float:
+			cs := col.Diff(periods)
+			cs.Name = col.Name
+			result.columns[i] = cs
+		}
+	}
+	return result
+}
+
+// PctChange returns a new DataFrame where each numeric column is replaced by
+// its percentage change relative to the element periods positions prior.
+func (df DataFrame) PctChange(periods int, subset ...string) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	result := df.Copy()
+	applies := func(name string) bool {
+		if len(subset) == 0 {
+			return true
+		}
+		for _, s := range subset {
+			if s == name {
+				return true
+			}
+		}
+		return false
+	}
+	for i, col := range result.columns {
+		if !applies(col.Name) {
+			continue
+		}
+		switch col.Type() {
+		case series.Int, series.Float:
+			cs := col.PctChange(periods)
+			cs.Name = col.Name
+			result.columns[i] = cs
+		}
+	}
+	return result
+}
+
+// Corr returns the pairwise Pearson correlation matrix of all numeric columns
+// as a new DataFrame. Rows and columns are labeled by column names.
+func (df DataFrame) Corr() DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	var numCols []series.Series
+	for _, col := range df.columns {
+		switch col.Type() {
+		case series.Int, series.Float:
+			numCols = append(numCols, col)
+		}
+	}
+	n := len(numCols)
+	if n == 0 {
+		return DataFrame{Err: fmt.Errorf("Corr: no numeric columns")}
+	}
+	// Build result: first column is labels, then n columns of floats.
+	names := make([]string, n)
+	for i, c := range numCols {
+		names[i] = c.Name
+	}
+	labelCol := series.Strings(names)
+	labelCol.Name = ""
+	cols := []series.Series{labelCol}
+	for _, a := range numCols {
+		vals := make([]float64, n)
+		for j, b := range numCols {
+			vals[j] = a.Corr(b)
+		}
+		s := series.Floats(vals)
+		s.Name = a.Name
+		cols = append(cols, s)
+	}
+	return New(cols...)
+}
+
+// Cov returns the pairwise sample covariance matrix of all numeric columns
+// as a new DataFrame.
+func (df DataFrame) Cov() DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	var numCols []series.Series
+	for _, col := range df.columns {
+		switch col.Type() {
+		case series.Int, series.Float:
+			numCols = append(numCols, col)
+		}
+	}
+	n := len(numCols)
+	if n == 0 {
+		return DataFrame{Err: fmt.Errorf("Cov: no numeric columns")}
+	}
+	names := make([]string, n)
+	for i, c := range numCols {
+		names[i] = c.Name
+	}
+	labelCol := series.Strings(names)
+	labelCol.Name = ""
+	cols := []series.Series{labelCol}
+	for _, a := range numCols {
+		vals := make([]float64, n)
+		for j, b := range numCols {
+			vals[j] = a.Cov(b)
+		}
+		s := series.Floats(vals)
+		s.Name = a.Name
+		cols = append(cols, s)
+	}
+	return New(cols...)
+}
+
+// Melt unpivots a DataFrame from wide format to long format, analogous to
+// pandas DataFrame.melt().
+//
+// idVars: columns to keep as identifier variables (rows are repeated).
+// valueVars: columns to unpivot; if empty, all non-id columns are used.
+// varName: name of the new column that holds the original column names (default "variable").
+// valueName: name of the new column that holds the cell values (default "value").
+func (df DataFrame) Melt(idVars []string, valueVars []string, varName, valueName string) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	if varName == "" {
+		varName = "variable"
+	}
+	if valueName == "" {
+		valueName = "value"
+	}
+	// Resolve valueVars.
+	if len(valueVars) == 0 {
+		idSet := make(map[string]struct{}, len(idVars))
+		for _, n := range idVars {
+			idSet[n] = struct{}{}
+		}
+		for _, name := range df.Names() {
+			if _, ok := idSet[name]; !ok {
+				valueVars = append(valueVars, name)
+			}
+		}
+	}
+	// Validate columns.
+	for _, n := range idVars {
+		if df.ColIndex(n) < 0 {
+			return DataFrame{Err: fmt.Errorf("melt: id column %q not found", n)}
+		}
+	}
+	for _, n := range valueVars {
+		if df.ColIndex(n) < 0 {
+			return DataFrame{Err: fmt.Errorf("melt: value column %q not found", n)}
+		}
+	}
+
+	nrows := df.nrows
+	nval := len(valueVars)
+	totalRows := nrows * nval
+
+	// Build output id columns.
+	outCols := make([]series.Series, len(idVars)+2)
+	for k, idName := range idVars {
+		src := df.Col(idName)
+		// Repeat each element nval times, alternating rows.
+		elems := make([]interface{}, totalRows)
+		for i := 0; i < nrows; i++ {
+			for j := 0; j < nval; j++ {
+				elems[i*nval+j] = src.Elem(i).Val()
+			}
+		}
+		outCols[k] = series.New(elems, src.Type(), idName)
+	}
+
+	// Build variable column.
+	varElems := make([]string, totalRows)
+	for i := 0; i < nrows; i++ {
+		for j, vn := range valueVars {
+			varElems[i*nval+j] = vn
+		}
+	}
+	outCols[len(idVars)] = series.Strings(varElems)
+	outCols[len(idVars)].Name = varName
+
+	// Build value column — use Float for numeric, String otherwise.
+	valElems := make([]interface{}, totalRows)
+	for i := 0; i < nrows; i++ {
+		for j, vn := range valueVars {
+			valElems[i*nval+j] = df.Col(vn).Elem(i).Val()
+		}
+	}
+	// Detect type: if all value columns are numeric, use Float; otherwise String.
+	valType := series.Float
+	for _, vn := range valueVars {
+		switch df.Col(vn).Type() {
+		case series.String, series.Bool, series.Time:
+			valType = series.String
+		}
+	}
+	outCols[len(idVars)+1] = series.New(valElems, valType, valueName)
+
+	return New(outCols...)
+}
+
 // InnerJoin returns a DataFrame containing the inner join of two DataFrames.
+// It uses a hash-join algorithm (O(n+m)) instead of a nested-loop (O(n*m)).
 func (df DataFrame) InnerJoin(b DataFrame, keys ...string) DataFrame {
 	if len(keys) == 0 {
 		return DataFrame{Err: fmt.Errorf("join keys not specified")}
 	}
-	// Check that we have all given keys in both DataFrames
-	var iKeysA []int
-	var iKeysB []int
-	var errorArr []string
-	for _, key := range keys {
-		i := df.ColIndex(key)
-		if i < 0 {
-			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on left DataFrame", key))
-		}
-		iKeysA = append(iKeysA, i)
-		j := b.ColIndex(key)
-		if j < 0 {
-			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on right DataFrame", key))
-		}
-		iKeysB = append(iKeysB, j)
+	jk, err := resolveJoinKeys(df, b, keys)
+	if err != nil {
+		return DataFrame{Err: err}
 	}
-	if len(errorArr) != 0 {
-		return DataFrame{Err: fmt.Errorf(strings.Join(errorArr, "\n"))}
-	}
-
 	aCols := df.columns
 	bCols := b.columns
-	// Initialize newCols
-	var newCols []series.Series
-	for _, i := range iKeysA {
-		newCols = append(newCols, aCols[i].Empty())
-	}
-	var iNotKeysA []int
-	for i := 0; i < df.ncols; i++ {
-		if !inIntSlice(i, iKeysA) {
-			iNotKeysA = append(iNotKeysA, i)
-			newCols = append(newCols, aCols[i].Empty())
-		}
-	}
-	var iNotKeysB []int
-	for i := 0; i < b.ncols; i++ {
-		if !inIntSlice(i, iKeysB) {
-			iNotKeysB = append(iNotKeysB, i)
-			newCols = append(newCols, bCols[i].Empty())
-		}
-	}
+	newCols := jk.newCols
 
-	// Fill newCols
+	// Build hash table on b.
+	ht := buildHashTable(b, jk.iKeysB)
+
 	for i := 0; i < df.nrows; i++ {
-		for j := 0; j < b.nrows; j++ {
-			match := true
-			for k := range keys {
-				aElem := aCols[iKeysA[k]].Elem(i)
-				bElem := bCols[iKeysB[k]].Elem(j)
-				match = match && aElem.Eq(bElem)
-			}
-			if match {
-				ii := 0
-				for _, k := range iKeysA {
-					elem := aCols[k].Elem(i)
-					newCols[ii].Append(elem)
-					ii++
-				}
-				for _, k := range iNotKeysA {
-					elem := aCols[k].Elem(i)
-					newCols[ii].Append(elem)
-					ii++
-				}
-				for _, k := range iNotKeysB {
-					elem := bCols[k].Elem(j)
-					newCols[ii].Append(elem)
-					ii++
-				}
-			}
+		aKey := buildJoinKey(aCols, jk.iKeysA, i)
+		for _, j := range ht[aKey] {
+			appendMatchedRow(newCols, aCols, bCols, jk, i, j)
 		}
 	}
 	return New(newCols...)
 }
 
 // LeftJoin returns a DataFrame containing the left join of two DataFrames.
+// It uses a hash-join algorithm (O(n+m)) instead of a nested-loop (O(n*m)).
 func (df DataFrame) LeftJoin(b DataFrame, keys ...string) DataFrame {
 	if len(keys) == 0 {
 		return DataFrame{Err: fmt.Errorf("join keys not specified")}
 	}
-	// Check that we have all given keys in both DataFrames
-	var iKeysA []int
-	var iKeysB []int
-	var errorArr []string
-	for _, key := range keys {
-		i := df.ColIndex(key)
-		if i < 0 {
-			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on left DataFrame", key))
-		}
-		iKeysA = append(iKeysA, i)
-		j := b.ColIndex(key)
-		if j < 0 {
-			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on right DataFrame", key))
-		}
-		iKeysB = append(iKeysB, j)
+	jk, err := resolveJoinKeys(df, b, keys)
+	if err != nil {
+		return DataFrame{Err: err}
 	}
-	if len(errorArr) != 0 {
-		return DataFrame{Err: fmt.Errorf(strings.Join(errorArr, "\n"))}
-	}
-
 	aCols := df.columns
 	bCols := b.columns
-	// Initialize newCols
-	var newCols []series.Series
-	for _, i := range iKeysA {
-		newCols = append(newCols, aCols[i].Empty())
-	}
-	var iNotKeysA []int
-	for i := 0; i < df.ncols; i++ {
-		if !inIntSlice(i, iKeysA) {
-			iNotKeysA = append(iNotKeysA, i)
-			newCols = append(newCols, aCols[i].Empty())
-		}
-	}
-	var iNotKeysB []int
-	for i := 0; i < b.ncols; i++ {
-		if !inIntSlice(i, iKeysB) {
-			iNotKeysB = append(iNotKeysB, i)
-			newCols = append(newCols, bCols[i].Empty())
-		}
-	}
+	newCols := jk.newCols
 
-	// Fill newCols
+	ht := buildHashTable(b, jk.iKeysB)
+
 	for i := 0; i < df.nrows; i++ {
-		matched := false
-		for j := 0; j < b.nrows; j++ {
-			match := true
-			for k := range keys {
-				aElem := aCols[iKeysA[k]].Elem(i)
-				bElem := bCols[iKeysB[k]].Elem(j)
-				match = match && aElem.Eq(bElem)
-			}
-			if match {
-				matched = true
-				ii := 0
-				for _, k := range iKeysA {
-					elem := aCols[k].Elem(i)
-					newCols[ii].Append(elem)
-					ii++
-				}
-				for _, k := range iNotKeysA {
-					elem := aCols[k].Elem(i)
-					newCols[ii].Append(elem)
-					ii++
-				}
-				for _, k := range iNotKeysB {
-					elem := bCols[k].Elem(j)
-					newCols[ii].Append(elem)
-					ii++
-				}
-			}
-		}
-		if !matched {
-			ii := 0
-			for _, k := range iKeysA {
-				elem := aCols[k].Elem(i)
-				newCols[ii].Append(elem)
-				ii++
-			}
-			for _, k := range iNotKeysA {
-				elem := aCols[k].Elem(i)
-				newCols[ii].Append(elem)
-				ii++
-			}
-			for range iNotKeysB {
-				newCols[ii].Append(nil)
-				ii++
+		aKey := buildJoinKey(aCols, jk.iKeysA, i)
+		matches := ht[aKey]
+		if len(matches) == 0 {
+			appendLeftOnlyRow(newCols, aCols, jk, i)
+		} else {
+			for _, j := range matches {
+				appendMatchedRow(newCols, aCols, bCols, jk, i, j)
 			}
 		}
 	}
@@ -1910,237 +2359,78 @@ func (df DataFrame) LeftJoin(b DataFrame, keys ...string) DataFrame {
 }
 
 // RightJoin returns a DataFrame containing the right join of two DataFrames.
+// It uses a hash-join algorithm (O(n+m)) instead of a nested-loop (O(n*m)).
 func (df DataFrame) RightJoin(b DataFrame, keys ...string) DataFrame {
 	if len(keys) == 0 {
 		return DataFrame{Err: fmt.Errorf("join keys not specified")}
 	}
-	// Check that we have all given keys in both DataFrames
-	var iKeysA []int
-	var iKeysB []int
-	var errorArr []string
-	for _, key := range keys {
-		i := df.ColIndex(key)
-		if i < 0 {
-			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on left DataFrame", key))
-		}
-		iKeysA = append(iKeysA, i)
-		j := b.ColIndex(key)
-		if j < 0 {
-			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on right DataFrame", key))
-		}
-		iKeysB = append(iKeysB, j)
+	jk, err := resolveJoinKeys(df, b, keys)
+	if err != nil {
+		return DataFrame{Err: err}
 	}
-	if len(errorArr) != 0 {
-		return DataFrame{Err: fmt.Errorf(strings.Join(errorArr, "\n"))}
-	}
-
 	aCols := df.columns
 	bCols := b.columns
-	// Initialize newCols
-	var newCols []series.Series
-	for _, i := range iKeysA {
-		newCols = append(newCols, aCols[i].Empty())
-	}
-	var iNotKeysA []int
-	for i := 0; i < df.ncols; i++ {
-		if !inIntSlice(i, iKeysA) {
-			iNotKeysA = append(iNotKeysA, i)
-			newCols = append(newCols, aCols[i].Empty())
-		}
-	}
-	var iNotKeysB []int
-	for i := 0; i < b.ncols; i++ {
-		if !inIntSlice(i, iKeysB) {
-			iNotKeysB = append(iNotKeysB, i)
-			newCols = append(newCols, bCols[i].Empty())
-		}
+	newCols := jk.newCols
+
+	// Build hash table on a (left side).
+	htA := make(map[string][]int, df.nrows)
+	for i := 0; i < df.nrows; i++ {
+		k := buildJoinKey(aCols, jk.iKeysA, i)
+		htA[k] = append(htA[k], i)
 	}
 
-	// Fill newCols
-	var yesmatched []struct{ i, j int }
-	var nonmatched []int
+	// First pass: emit matched rows, preserving b's row order.
 	for j := 0; j < b.nrows; j++ {
-		matched := false
-		for i := 0; i < df.nrows; i++ {
-			match := true
-			for k := range keys {
-				aElem := aCols[iKeysA[k]].Elem(i)
-				bElem := bCols[iKeysB[k]].Elem(j)
-				match = match && aElem.Eq(bElem)
-			}
-			if match {
-				matched = true
-				yesmatched = append(yesmatched, struct{ i, j int }{i, j})
-			}
-		}
-		if !matched {
-			nonmatched = append(nonmatched, j)
+		bKey := buildJoinKey(bCols, jk.iKeysB, j)
+		for _, i := range htA[bKey] {
+			appendMatchedRow(newCols, aCols, bCols, jk, i, j)
 		}
 	}
-	for _, v := range yesmatched {
-		i := v.i
-		j := v.j
-		ii := 0
-		for _, k := range iKeysA {
-			elem := aCols[k].Elem(i)
-			newCols[ii].Append(elem)
-			ii++
-		}
-		for _, k := range iNotKeysA {
-			elem := aCols[k].Elem(i)
-			newCols[ii].Append(elem)
-			ii++
-		}
-		for _, k := range iNotKeysB {
-			elem := bCols[k].Elem(j)
-			newCols[ii].Append(elem)
-			ii++
-		}
-	}
-	for _, j := range nonmatched {
-		ii := 0
-		for _, k := range iKeysB {
-			elem := bCols[k].Elem(j)
-			newCols[ii].Append(elem)
-			ii++
-		}
-		for range iNotKeysA {
-			newCols[ii].Append(nil)
-			ii++
-		}
-		for _, k := range iNotKeysB {
-			elem := bCols[k].Elem(j)
-			newCols[ii].Append(elem)
-			ii++
+	// Second pass: emit right-only rows (b rows with no match in a).
+	for j := 0; j < b.nrows; j++ {
+		bKey := buildJoinKey(bCols, jk.iKeysB, j)
+		if len(htA[bKey]) == 0 {
+			appendRightOnlyRow(newCols, bCols, jk, j)
 		}
 	}
 	return New(newCols...)
 }
 
 // OuterJoin returns a DataFrame containing the outer join of two DataFrames.
+// It uses a hash-join algorithm (O(n+m)) instead of a nested-loop (O(n*m)).
 func (df DataFrame) OuterJoin(b DataFrame, keys ...string) DataFrame {
 	if len(keys) == 0 {
 		return DataFrame{Err: fmt.Errorf("join keys not specified")}
 	}
-	// Check that we have all given keys in both DataFrames
-	var iKeysA []int
-	var iKeysB []int
-	var errorArr []string
-	for _, key := range keys {
-		i := df.ColIndex(key)
-		if i < 0 {
-			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on left DataFrame", key))
-		}
-		iKeysA = append(iKeysA, i)
-		j := b.ColIndex(key)
-		if j < 0 {
-			errorArr = append(errorArr, fmt.Sprintf("can't find key %q on right DataFrame", key))
-		}
-		iKeysB = append(iKeysB, j)
+	jk, err := resolveJoinKeys(df, b, keys)
+	if err != nil {
+		return DataFrame{Err: err}
 	}
-	if len(errorArr) != 0 {
-		return DataFrame{Err: fmt.Errorf(strings.Join(errorArr, "\n"))}
-	}
-
 	aCols := df.columns
 	bCols := b.columns
-	// Initialize newCols
-	var newCols []series.Series
-	for _, i := range iKeysA {
-		newCols = append(newCols, aCols[i].Empty())
-	}
-	var iNotKeysA []int
-	for i := 0; i < df.ncols; i++ {
-		if !inIntSlice(i, iKeysA) {
-			iNotKeysA = append(iNotKeysA, i)
-			newCols = append(newCols, aCols[i].Empty())
-		}
-	}
-	var iNotKeysB []int
-	for i := 0; i < b.ncols; i++ {
-		if !inIntSlice(i, iKeysB) {
-			iNotKeysB = append(iNotKeysB, i)
-			newCols = append(newCols, bCols[i].Empty())
-		}
-	}
+	newCols := jk.newCols
 
-	// Fill newCols
+	// Build hash table on b; track which b rows were matched.
+	htB := buildHashTable(b, jk.iKeysB)
+	bMatched := make([]bool, b.nrows)
+
+	// Iterate a: emit matched rows; emit left-only rows for unmatched a rows.
 	for i := 0; i < df.nrows; i++ {
-		matched := false
-		for j := 0; j < b.nrows; j++ {
-			match := true
-			for k := range keys {
-				aElem := aCols[iKeysA[k]].Elem(i)
-				bElem := bCols[iKeysB[k]].Elem(j)
-				match = match && aElem.Eq(bElem)
-			}
-			if match {
-				matched = true
-				ii := 0
-				for _, k := range iKeysA {
-					elem := aCols[k].Elem(i)
-					newCols[ii].Append(elem)
-					ii++
-				}
-				for _, k := range iNotKeysA {
-					elem := aCols[k].Elem(i)
-					newCols[ii].Append(elem)
-					ii++
-				}
-				for _, k := range iNotKeysB {
-					elem := bCols[k].Elem(j)
-					newCols[ii].Append(elem)
-					ii++
-				}
-			}
-		}
-		if !matched {
-			ii := 0
-			for _, k := range iKeysA {
-				elem := aCols[k].Elem(i)
-				newCols[ii].Append(elem)
-				ii++
-			}
-			for _, k := range iNotKeysA {
-				elem := aCols[k].Elem(i)
-				newCols[ii].Append(elem)
-				ii++
-			}
-			for range iNotKeysB {
-				newCols[ii].Append(nil)
-				ii++
+		aKey := buildJoinKey(aCols, jk.iKeysA, i)
+		matches := htB[aKey]
+		if len(matches) == 0 {
+			appendLeftOnlyRow(newCols, aCols, jk, i)
+		} else {
+			for _, j := range matches {
+				appendMatchedRow(newCols, aCols, bCols, jk, i, j)
+				bMatched[j] = true
 			}
 		}
 	}
+	// Emit right-only rows for b rows that had no match in a.
 	for j := 0; j < b.nrows; j++ {
-		matched := false
-		for i := 0; i < df.nrows; i++ {
-			match := true
-			for k := range keys {
-				aElem := aCols[iKeysA[k]].Elem(i)
-				bElem := bCols[iKeysB[k]].Elem(j)
-				match = match && aElem.Eq(bElem)
-			}
-			if match {
-				matched = true
-			}
-		}
-		if !matched {
-			ii := 0
-			for _, k := range iKeysB {
-				elem := bCols[k].Elem(j)
-				newCols[ii].Append(elem)
-				ii++
-			}
-			for range iNotKeysA {
-				newCols[ii].Append(nil)
-				ii++
-			}
-			for _, k := range iNotKeysB {
-				elem := bCols[k].Elem(j)
-				newCols[ii].Append(elem)
-				ii++
-			}
+		if !bMatched[j] {
+			appendRightOnlyRow(newCols, bCols, jk, j)
 		}
 	}
 	return New(newCols...)

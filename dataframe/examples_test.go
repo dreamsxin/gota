@@ -312,7 +312,7 @@ func ExampleDataFrame_Mutate() {
 	fmt.Println(mut2)
 
 	// Output:
-	//   [4x4] DataFrame
+	// [4x4] DataFrame
 	//
 	//     A        B     C        D
 	//  0: a        4     a        true
@@ -320,7 +320,7 @@ func ExampleDataFrame_Mutate() {
 	//  2: k        4     c        true
 	//  3: a        2     d        false
 	//     <string> <int> <string> <bool>
-
+	//
 	// [4x5] DataFrame
 	//
 	//     A        B     C        D      E

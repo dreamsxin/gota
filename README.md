@@ -1,11 +1,47 @@
 Gota: DataFrames, Series and Data Wrangling for Go
 ==================================================
 
-Meet us on Slack: Slack: [gophers.slack.com](https://gophers.slack.com) #go-gota ([invite](https://gophersinvite.herokuapp.com/))
-
 This is an implementation of DataFrames, Series and data wrangling
 methods for the Go programming language. The API is still in flux so
 *use at your own risk*.
+
+## Table of Contents
+
+- [DataFrame](#dataframe)
+  - [Loading data](#loading-data)
+  - [Get row data](#get-row-data)
+  - [Subsetting](#subsetting)
+  - [Column selection](#column-selection)
+  - [Updating values](#updating-values)
+  - [Filtering](#filtering)
+  - [GroupBy, Aggregation, Apply & Transform](#groupby--aggregation)
+  - [Pivot](#pivot)
+  - [Arrange](#arrange)
+  - [Mutate](#mutate)
+  - [Joins](#joins)
+  - [Function application](#function-application)
+  - [Cumulative statistics](#cumulative-statistics-dataframe)
+  - [Diff & PctChange](#diff--pctchange-dataframe)
+  - [FillNA with strategy and limit](#fillna-with-strategy-and-limit)
+  - [Correlation & Covariance](#correlation--covariance-dataframe)
+  - [Melt (wide → long)](#melt-wide--long)
+  - [Excel I/O](#excel-io)
+  - [SQL I/O](#sql-io)
+  - [Index & MultiIndex](#index--multiindex)
+  - [Chaining operations](#chaining-operations)
+  - [Print to console](#print-to-console)
+  - [Interfacing with gonum](#interfacing-with-gonum)
+- [Series](#series)
+  - [FillNaN](#fillnan)
+  - [FillNaN with limit](#fillnan-with-forward--backward-limit)
+  - [Rolling Window](#rolling-window)
+  - [EWM (Exponentially Weighted Moving)](#ewm-exponentially-weighted-moving)
+  - [Cumulative statistics](#cumulative-statistics-series)
+  - [Diff & PctChange](#diff--pctchange-series)
+  - [Correlation & Covariance](#correlation--covariance-series)
+- [License](#license)
+
+---
 
 DataFrame
 ---------
@@ -258,13 +294,47 @@ fil := df.Filter(
 
 This example filters rows based on whether they have a cell value starting with `"aa"` in column `"A"`.
 
-#### GroupBy && Aggregation
+#### GroupBy & Aggregation
 
-GroupBy && Aggregation
+GroupBy groups rows by one or more key columns and supports aggregation,
+custom apply functions, and column-wise transforms.
 
 ```go
-groups := df.GroupBy("key1", "key2") // Group by column "key1", and column "key2" 
-aggre := groups.Aggregation([]AggregationType{Aggregation_MAX, Aggregation_MIN}, []string{"values", "values2"}) // Maximum value in column "values",  Minimum value in column "values2"
+groups := df.GroupBy("key1", "key2") // group by "key1" and "key2"
+aggre  := groups.Aggregation(
+    []AggregationType{Aggregation_MAX, Aggregation_MIN},
+    []string{"values", "values2"}, // max of "values", min of "values2"
+)
+```
+
+**GroupBy.Apply** — apply an arbitrary function to each group and
+concatenate the results, similar to `pandas groupby().apply()`:
+
+```go
+result := df.GroupBy("category").Apply(func(g dataframe.DataFrame) dataframe.DataFrame {
+    // return a transformed or summarised DataFrame for this group
+    return g.Capply(func(s series.Series) series.Series {
+        return series.Floats(s.Mean())
+    })
+})
+```
+
+**GroupBy.Transform** — apply a function to a single column within each
+group and return the results aligned to the original row order, similar
+to `pandas groupby().transform()`:
+
+```go
+groups := df.GroupBy("category")
+transformed, err := groups.Transform("value", func(s series.Series) series.Series {
+    mean := s.Mean()
+    // subtract group mean (group-wise de-mean)
+    vals := s.Float()
+    out := make([]float64, len(vals))
+    for i, v := range vals {
+        out[i] = v - mean
+    }
+    return series.Floats(out...)
+})
 ```
 
 #### Pivot
@@ -352,6 +422,175 @@ df.Capply(mean)
 df.Rapply(mean)
 ```
 
+#### Cumulative statistics (DataFrame)
+
+`CumSum`, `CumProd` compute running totals on all numeric columns (or
+a named subset).  Non-numeric columns are passed through unchanged.
+
+```go
+// cumulative sum of all numeric columns
+cumDF := df.CumSum()
+
+// cumulative product of selected columns only
+cumProd := df.CumProd("price", "qty")
+```
+
+#### Diff & PctChange (DataFrame)
+
+```go
+// first-order difference (row[i] - row[i-1]) for all numeric columns
+diffDF := df.Diff(1)
+
+// percentage change over 2 periods for selected columns
+pct := df.PctChange(2, "close", "volume")
+```
+
+#### FillNA with strategy and limit
+
+Fill NaN values using forward-fill or backward-fill with an optional
+maximum fill count per gap:
+
+```go
+// forward-fill, fill at most 2 consecutive NaNs
+filled := df.FillNAStrategyLimit(dataframe.FILLNA_FORWARD, 2)
+
+// backward-fill with no limit (0 = unlimited)
+filled := df.FillNAStrategyLimit(dataframe.FILLNA_BACKWARD, 0, "col1", "col2")
+```
+
+#### Correlation & Covariance (DataFrame)
+
+`Corr` returns the Pearson correlation matrix; `Cov` returns the
+sample covariance matrix. Both operate on all numeric columns and
+return a square DataFrame whose row/column names are the original
+column names.
+
+```go
+corrMatrix := df.Corr()
+covMatrix  := df.Cov()
+```
+
+#### Melt (wide → long)
+
+`Melt` unpivots a DataFrame from wide format to long format, similar
+to `pandas.melt()`.
+
+```go
+// idVars: columns to keep as identifiers
+// valueVars: columns to unpivot (empty = all other columns)
+// varName: name for the new "variable" column
+// valueName: name for the new "value" column
+long := df.Melt([]string{"id", "date"}, []string{"open", "high", "low", "close"}, "field", "value")
+```
+
+#### Excel I/O
+
+Read from or write to XLSX files using the `ReadXLSX`/`WriteXLSX`
+family of functions. The implementation uses
+[excelize](https://github.com/xuri/excelize) under the hood and
+requires **no CGO**.
+
+```go
+// Read from an io.Reader (first sheet, first row = header)
+f, _ := os.Open("data.xlsx")
+df := dataframe.ReadXLSX(f)
+
+// Convenience file-path wrapper
+df := dataframe.ReadXLSXFile("data.xlsx")
+
+// Write to an io.Writer
+out, _ := os.Create("output.xlsx")
+err := df.WriteXLSX(out)
+
+// Convenience file-path wrapper
+err := df.WriteXLSXFile("output.xlsx")
+```
+
+Load options (same as `LoadRecords`) can be passed to `ReadXLSX`:
+
+```go
+df := dataframe.ReadXLSXFile("data.xlsx",
+    dataframe.HasHeader(true),
+    dataframe.WithTypes(map[string]series.Type{"price": series.Float}),
+)
+```
+
+#### SQL I/O
+
+**FromSQL** — build a DataFrame from a `*sql.Rows` result set.
+Column types are inferred from the SQL metadata; `NULL` values become
+`NaN`.
+
+```go
+rows, err := db.Query("SELECT id, name, score FROM users WHERE active = 1")
+if err != nil { log.Fatal(err) }
+df := dataframe.FromSQL(rows)
+```
+
+**WriteSQL** — insert a DataFrame into a database table using batched
+`INSERT` statements. Supports automatic table creation and truncation.
+
+```go
+err := df.WriteSQL(db, "users",
+    dataframe.WithCreateTable(true),   // CREATE TABLE IF NOT EXISTS
+    dataframe.WithTruncateFirst(true), // DELETE FROM users before inserting
+    dataframe.WithBatchSize(200),      // rows per INSERT statement (default 500)
+)
+```
+
+SQL type mapping:
+
+| SQL type | Series type |
+|---|---|
+| INT / INTEGER / BIGINT … | `series.Int` |
+| REAL / FLOAT / DOUBLE … | `series.Float` |
+| BOOL / BOOLEAN | `series.Bool` |
+| DATE / DATETIME / TIMESTAMP | `series.Time` |
+| everything else | `series.String` |
+
+#### Index & MultiIndex
+
+Gota provides a lightweight label-based row index system analogous to
+`pandas.Index` / `pandas.MultiIndex`.
+
+**Single-level Index**
+
+```go
+// Attach an explicit index to a DataFrame
+idx := dataframe.NewIndex([]string{"a", "b", "c", "d"})
+idf, err := df.WithIndex(idx)
+
+// Label-based row lookup (all rows with this label)
+rows := idf.Loc("b")
+
+// Inclusive label slice
+rows := idf.LocSlice("a", "c") // rows for labels a, b, c
+
+// Convert a column into the row index (drops that column from the frame)
+idf, err := df.WithColumnIndex("id")
+
+// Restore to a regular DataFrame (index labels become a new column)
+plain := idf.ResetIndex("id")
+```
+
+**Multi-level Index**
+
+```go
+// Build a two-level MultiIndex
+mi, err := dataframe.NewMultiIndex(
+    []string{"2024", "2024", "2025", "2025"}, // level 0: year
+    []string{"Q1",   "Q2",   "Q1",   "Q2"},   // level 1: quarter
+)
+
+midf, err := df.WithMultiIndex(mi)
+
+// Full key lookup
+rows := midf.Loc("2024", "Q1")
+
+// Partial key lookup (all rows in 2024)
+rows := midf.Loc("2024")
+```
+
 #### Chaining operations
 
 DataFrames support a number of methods for wrangling the data,
@@ -372,18 +611,20 @@ if a.Err != nil {
     log.Fatal("Oh noes!")
 }
 ```
-#### Save a dataframe to file
-with using `WriteCSV` you can write a dataframe to a csv file. 
 
-```
+#### Save a dataframe to file
+
+With `WriteCSV` you can write a dataframe to a CSV file.
+
+```go
 file, err := os.Create("output.csv")
-// Create file
 defer file.Close()
 if err != nil {
-	log.Fatal(err)
+    log.Fatal(err)
 }
 df.WriteCSV(file)
 ```
+
 #### Print to console
 
 ```go
@@ -433,6 +674,8 @@ func (m matrix) T() mat.Matrix {
 }
 ```
 
+---
+
 Series
 ------
 
@@ -448,14 +691,127 @@ Float
 String
 Bool
 ```
+
 ### Usage
 
 #### FillNaN
 
 ```go
-s := series.New([]interface{"a", "b", nil}, series.String, "COL.1")
-s.FillNaN(Strings("c"))
+s := series.New([]interface{}{"a", "b", nil}, series.String, "COL.1")
+s.FillNaN(series.Strings("c"))
 ```
+
+#### FillNaN with forward / backward limit
+
+Forward-fill and backward-fill support an optional `limit` parameter
+that caps how many consecutive NaN values are filled:
+
+```go
+s := series.New([]interface{}{1.0, nil, nil, nil, 5.0}, series.Float, "x")
+
+// fill at most 1 NaN gap forward
+s.FillNaNForwardLimit(1)   // → [1, 1, NaN, NaN, 5]
+
+// fill all NaN gaps backward (limit 0 = unlimited)
+s.FillNaNBackwardLimit(0)  // → [1, 5, 5, 5, 5]
+```
+
+#### Rolling Window
+
+```go
+s := series.New([]float64{1, 2, 3, 4, 5}, series.Float, "x")
+
+// 3-period rolling mean; NaN for the first 2 positions
+s.Rolling(3).Mean()
+
+// Allow results where at least 1 observation is present
+s.Rolling(3).MinPeriods(1).Mean()
+
+// Other aggregations: Sum, Min, Max, StdDev, Apply
+s.Rolling(3).Sum()
+s.Rolling(3).StdDev()
+s.Rolling(3).Apply(func(w []float64) float64 {
+    // custom aggregation
+    return w[len(w)-1] - w[0]
+})
+```
+
+#### EWM (Exponentially Weighted Moving)
+
+EWM mirrors the `pandas.ewm()` interface. The most common entry point
+is `series.EWM(span)` where `alpha = 2 / (span + 1)`.
+
+```go
+s := series.New([]float64{1, 2, 3, 4, 5}, series.Float, "price")
+
+// Exponentially weighted moving average (adjusted mode, pandas-compatible)
+s.EWM(3).Mean()
+
+// Use alpha directly instead of span
+s.EWMAlpha(0.5).Mean()
+
+// Non-adjusted (recursive) mode
+s.EWM(3).Adjust(false).Mean()
+
+// Require at least 2 observations before emitting a result
+s.EWM(3).MinPeriods(2).Mean()
+
+// Variance and standard deviation
+s.EWM(3).Var()
+s.EWM(3).Std()
+```
+
+The `adjust` parameter (default `true`) determines the weighting scheme:
+
+| Mode | Formula for position i |
+|---|---|
+| `Adjust(true)` | `Σ (1-α)^k · x[i-k] / Σ (1-α)^k` (pandas default) |
+| `Adjust(false)` | `y[i] = α·x[i] + (1-α)·y[i-1]` (recursive) |
+
+#### Cumulative statistics (Series)
+
+```go
+s := series.New([]float64{1, 2, 3, 4, 5}, series.Float, "x")
+
+s.CumSum()  // [1, 3, 6, 10, 15]
+s.CumProd() // [1, 2, 6, 24, 120]
+s.CumMax()  // [1, 2, 3, 4, 5]
+s.CumMin()  // [1, 1, 1, 1, 1]
+```
+
+NaN values propagate: once a NaN appears in the input the corresponding
+output element and all subsequent elements will also be NaN.
+
+#### Diff & PctChange (Series)
+
+```go
+s := series.New([]float64{10, 12, 15, 11}, series.Float, "close")
+
+// First-order difference: [NaN, 2, 3, -4]
+s.Diff(1)
+
+// Difference over 2 periods: [NaN, NaN, 5, -1]
+s.Diff(2)
+
+// Percentage change: [NaN, 0.20, 0.25, -0.267]
+s.PctChange(1)
+```
+
+#### Correlation & Covariance (Series)
+
+Compute Pearson correlation coefficient or sample covariance between
+two Series.  Pairs where either element is NaN are excluded.  Returns
+`NaN` if fewer than 2 valid pairs exist.
+
+```go
+x := series.New([]float64{1, 2, 3, 4, 5}, series.Float, "x")
+y := series.New([]float64{2, 4, 6, 8, 10}, series.Float, "y")
+
+corr := x.Corr(y) // 1.0  (perfect positive correlation)
+cov  := x.Cov(y)  // 5.0  (sample covariance)
+```
+
+---
 
 For more information about the API, make sure to check:
 

@@ -135,7 +135,7 @@ func (e timeElement) LessEq(elem Element) bool {
 		return false
 	}
 	t, _ := elem.Time()
-	return e.e.Before(t) && e.e.Equal(t)
+	return e.e.Before(t) || e.e.Equal(t)
 }
 
 func (e timeElement) Greater(elem Element) bool {
@@ -151,5 +151,5 @@ func (e timeElement) GreaterEq(elem Element) bool {
 		return false
 	}
 	t, _ := elem.Time()
-	return e.e.After(t) && e.e.Equal(t)
+	return e.e.After(t) || e.e.Equal(t)
 }

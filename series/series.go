@@ -414,6 +414,46 @@ func (s Series) FillNaN(value Series) Series {
 	return s
 }
 
+// FillNaNForward fills NaN values with the most recent non-NaN value that
+// precedes them (forward fill / ffill).  Leading NaNs that have no predecessor
+// are left as NaN.
+func (s Series) FillNaNForward() Series {
+	result := s.Copy()
+	var lastVal interface{}
+	for i := 0; i < result.Len(); i++ {
+		elem := result.Elem(i)
+		if elem.IsNA() {
+			if lastVal != nil {
+				elem.Set(lastVal)
+			}
+		} else {
+			lastVal = elem.Val()
+		}
+	}
+	return result
+}
+
+// FillNaNBackward fills NaN values with the nearest non-NaN value that
+// follows them (backward fill / bfill).  Trailing NaNs that have no successor
+// are left as NaN.
+func (s Series) FillNaNBackward() Series {
+	result := s.Copy()
+	var nextVal interface{}
+	for i := result.Len() - 1; i >= 0; i-- {
+		elem := result.Elem(i)
+		if elem.IsNA() {
+			if nextVal != nil {
+				elem.Set(nextVal)
+			}
+		} else {
+			nextVal = elem.Val()
+		}
+	}
+	return result
+}
+
+
+
 // Compare compares the values of a Series with other elements. To do so, the
 // elements with are to be compared are first transformed to a Series of the same
 // type as the caller.
@@ -932,3 +972,274 @@ func (s Series) Slice(j, k int) Series {
 
 	return s.Subset(idxs)
 }
+
+// ValueCounts returns a map from each unique string representation of an element
+// to its occurrence count.  NaN values are counted under the key "NaN".
+func (s Series) ValueCounts() map[string]int {
+	counts := make(map[string]int, s.Len())
+	for i := 0; i < s.Len(); i++ {
+		counts[s.Elem(i).String()]++
+	}
+	return counts
+}
+
+// Unique returns a new Series containing only the first occurrence of each
+// distinct value (preserving original order).
+func (s Series) Unique() Series {
+	seen := make(map[string]struct{}, s.Len())
+	var idxs []int
+	for i := 0; i < s.Len(); i++ {
+		key := s.Elem(i).String()
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			idxs = append(idxs, i)
+		}
+	}
+	return s.Subset(idxs)
+}
+
+// NUnique returns the number of distinct non-NaN values in the Series.
+func (s Series) NUnique() int {
+	seen := make(map[string]struct{}, s.Len())
+	for i := 0; i < s.Len(); i++ {
+		elem := s.Elem(i)
+		if elem.IsNA() {
+			continue
+		}
+		seen[elem.String()] = struct{}{}
+	}
+	return len(seen)
+}
+
+// CumSum returns a new Float Series containing the cumulative sum.
+// NaN values are propagated (a NaN in input produces NaN from that point).
+func (s Series) CumSum() Series {
+	result := New([]float64{}, Float, s.Name)
+	var cum float64
+	hasNaN := false
+	for i := 0; i < s.Len(); i++ {
+		elem := s.Elem(i)
+		if elem.IsNA() || hasNaN {
+			hasNaN = true
+			result.Append(math.NaN())
+		} else {
+			cum += elem.Float()
+			result.Append(cum)
+		}
+	}
+	return result
+}
+
+// CumProd returns a new Float Series containing the cumulative product.
+func (s Series) CumProd() Series {
+	result := New([]float64{}, Float, s.Name)
+	cum := 1.0
+	hasNaN := false
+	for i := 0; i < s.Len(); i++ {
+		elem := s.Elem(i)
+		if elem.IsNA() || hasNaN {
+			hasNaN = true
+			result.Append(math.NaN())
+		} else {
+			cum *= elem.Float()
+			result.Append(cum)
+		}
+	}
+	return result
+}
+
+// CumMax returns a new Float Series containing the cumulative maximum.
+func (s Series) CumMax() Series {
+	result := New([]float64{}, Float, s.Name)
+	curMax := math.NaN()
+	for i := 0; i < s.Len(); i++ {
+		elem := s.Elem(i)
+		if elem.IsNA() {
+			result.Append(math.NaN())
+		} else {
+			v := elem.Float()
+			if math.IsNaN(curMax) || v > curMax {
+				curMax = v
+			}
+			result.Append(curMax)
+		}
+	}
+	return result
+}
+
+// CumMin returns a new Float Series containing the cumulative minimum.
+func (s Series) CumMin() Series {
+	result := New([]float64{}, Float, s.Name)
+	curMin := math.NaN()
+	for i := 0; i < s.Len(); i++ {
+		elem := s.Elem(i)
+		if elem.IsNA() {
+			result.Append(math.NaN())
+		} else {
+			v := elem.Float()
+			if math.IsNaN(curMin) || v < curMin {
+				curMin = v
+			}
+			result.Append(curMin)
+		}
+	}
+	return result
+}
+
+// Diff returns a new Float Series of first-order differences (s[i] - s[i-periods]).
+// periods can be negative for backward differences. Leading/trailing positions
+// without a valid predecessor/successor are NaN.
+func (s Series) Diff(periods int) Series {
+	result := New([]float64{}, Float, s.Name)
+	n := s.Len()
+	for i := 0; i < n; i++ {
+		j := i - periods
+		if j < 0 || j >= n {
+			result.Append(math.NaN())
+			continue
+		}
+		cur := s.Elem(i)
+		prev := s.Elem(j)
+		if cur.IsNA() || prev.IsNA() {
+			result.Append(math.NaN())
+		} else {
+			result.Append(cur.Float() - prev.Float())
+		}
+	}
+	return result
+}
+
+// PctChange returns element-wise percentage change: (s[i] - s[i-periods]) / abs(s[i-periods]).
+// Equivalent to pandas Series.pct_change().
+func (s Series) PctChange(periods int) Series {
+	result := New([]float64{}, Float, s.Name)
+	n := s.Len()
+	for i := 0; i < n; i++ {
+		j := i - periods
+		if j < 0 || j >= n {
+			result.Append(math.NaN())
+			continue
+		}
+		cur := s.Elem(i)
+		prev := s.Elem(j)
+		if cur.IsNA() || prev.IsNA() {
+			result.Append(math.NaN())
+			continue
+		}
+		prevVal := prev.Float()
+		if prevVal == 0 {
+			result.Append(math.NaN())
+		} else {
+			result.Append((cur.Float() - prevVal) / math.Abs(prevVal))
+		}
+	}
+	return result
+}
+
+// FillNaNForwardLimit fills NaN values with the most recent non-NaN value,
+// but only for up to `limit` consecutive NaN positions.
+// limit <= 0 means no limit (equivalent to FillNaNForward).
+func (s Series) FillNaNForwardLimit(limit int) Series {
+	result := s.Copy()
+	var lastVal interface{}
+	streak := 0
+	for i := 0; i < result.Len(); i++ {
+		elem := result.Elem(i)
+		if elem.IsNA() {
+			streak++
+			if lastVal != nil && (limit <= 0 || streak <= limit) {
+				elem.Set(lastVal)
+			}
+		} else {
+			lastVal = elem.Val()
+			streak = 0
+		}
+	}
+	return result
+}
+
+// FillNaNBackwardLimit fills NaN values with the nearest following non-NaN value,
+// but only for up to `limit` consecutive NaN positions.
+// limit <= 0 means no limit (equivalent to FillNaNBackward).
+func (s Series) FillNaNBackwardLimit(limit int) Series {
+	result := s.Copy()
+	var nextVal interface{}
+	streak := 0
+	for i := result.Len() - 1; i >= 0; i-- {
+		elem := result.Elem(i)
+		if elem.IsNA() {
+			streak++
+			if nextVal != nil && (limit <= 0 || streak <= limit) {
+				elem.Set(nextVal)
+			}
+		} else {
+			nextVal = elem.Val()
+			streak = 0
+		}
+	}
+	return result
+}
+
+// Corr returns the Pearson correlation coefficient between s and other.
+// Both Series must have the same length. NaN pairs are skipped.
+func (s Series) Corr(other Series) float64 {
+	if s.Len() != other.Len() {
+		return math.NaN()
+	}
+	n := s.Len()
+	var sumX, sumY, sumXY, sumX2, sumY2 float64
+	count := 0
+	for i := 0; i < n; i++ {
+		a := s.Elem(i)
+		b := other.Elem(i)
+		if a.IsNA() || b.IsNA() {
+			continue
+		}
+		x, y := a.Float(), b.Float()
+		sumX += x
+		sumY += y
+		sumXY += x * y
+		sumX2 += x * x
+		sumY2 += y * y
+		count++
+	}
+	if count < 2 {
+		return math.NaN()
+	}
+	fc := float64(count)
+	num := fc*sumXY - sumX*sumY
+	den := math.Sqrt((fc*sumX2 - sumX*sumX) * (fc*sumY2 - sumY*sumY))
+	if den == 0 {
+		return math.NaN()
+	}
+	return num / den
+}
+
+// Cov returns the sample covariance between s and other (ddof=1).
+// NaN pairs are skipped.
+func (s Series) Cov(other Series) float64 {
+	if s.Len() != other.Len() {
+		return math.NaN()
+	}
+	n := s.Len()
+	var sumX, sumY, sumXY float64
+	count := 0
+	for i := 0; i < n; i++ {
+		a := s.Elem(i)
+		b := other.Elem(i)
+		if a.IsNA() || b.IsNA() {
+			continue
+		}
+		x, y := a.Float(), b.Float()
+		sumX += x
+		sumY += y
+		sumXY += x * y
+		count++
+	}
+	if count < 2 {
+		return math.NaN()
+	}
+	fc := float64(count)
+	return (sumXY - sumX*sumY/fc) / (fc - 1)
+}
+

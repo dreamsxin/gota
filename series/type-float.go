@@ -83,7 +83,7 @@ func (e floatElement) String() string {
 	if e.IsNA() {
 		return "NaN"
 	}
-	return fmt.Sprintf("%g", e.e)
+	return fmt.Sprintf("%f", e.e)
 }
 
 func (e floatElement) Int() (int, error) {

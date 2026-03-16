@@ -1891,3 +1891,158 @@ func TestSeries_FillNaN(t *testing.T) {
 		}
 	}
 }
+
+func TestSeries_FillNaNForward(t *testing.T) {
+	tests := []struct {
+		input    Series
+		expected []string
+	}{
+		{
+			// Basic forward fill: middle NaN filled with previous value.
+			Strings([]interface{}{"a", nil, "c"}),
+			[]string{"a", "a", "c"},
+		},
+		{
+			// Leading NaN must stay NaN (no predecessor).
+			Strings([]interface{}{nil, "b", nil, "d"}),
+			[]string{"NaN", "b", "b", "d"},
+		},
+		{
+			// All NaN: nothing to fill.
+			Ints([]interface{}{nil, nil, nil}),
+			[]string{"NaN", "NaN", "NaN"},
+		},
+		{
+			// Float forward fill.
+			Floats([]float64{1.0, math.NaN(), math.NaN(), 4.0}),
+			[]string{"1.000000", "1.000000", "1.000000", "4.000000"},
+		},
+	}
+	for testnum, test := range tests {
+		received := test.input.FillNaNForward().Records()
+		if !reflect.DeepEqual(test.expected, received) {
+			t.Errorf("Test:%v\nExpected:\n%v\nReceived:\n%v",
+				testnum, test.expected, received)
+		}
+	}
+}
+
+func TestSeries_FillNaNBackward(t *testing.T) {
+	tests := []struct {
+		input    Series
+		expected []string
+	}{
+		{
+			// Basic backward fill.
+			Strings([]interface{}{"a", nil, "c"}),
+			[]string{"a", "c", "c"},
+		},
+		{
+			// Trailing NaN must stay NaN (no successor).
+			Strings([]interface{}{nil, "b", nil, nil}),
+			[]string{"b", "b", "NaN", "NaN"},
+		},
+		{
+			// Float backward fill.
+			Floats([]float64{math.NaN(), math.NaN(), 3.0, 4.0}),
+			[]string{"3.000000", "3.000000", "3.000000", "4.000000"},
+		},
+	}
+	for testnum, test := range tests {
+		received := test.input.FillNaNBackward().Records()
+		if !reflect.DeepEqual(test.expected, received) {
+			t.Errorf("Test:%v\nExpected:\n%v\nReceived:\n%v",
+				testnum, test.expected, received)
+		}
+	}
+}
+
+func TestSeries_ValueCounts(t *testing.T) {
+	s := Strings([]string{"a", "b", "a", "c", "b", "a"})
+	counts := s.ValueCounts()
+	if counts["a"] != 3 {
+		t.Errorf("expected a=3, got %d", counts["a"])
+	}
+	if counts["b"] != 2 {
+		t.Errorf("expected b=2, got %d", counts["b"])
+	}
+	if counts["c"] != 1 {
+		t.Errorf("expected c=1, got %d", counts["c"])
+	}
+
+	// Empty series.
+	empty := Strings([]string{})
+	if len(empty.ValueCounts()) != 0 {
+		t.Errorf("expected empty map for empty series")
+	}
+
+	// Series with NaN: NaN is counted too.
+	withNaN := Ints([]interface{}{1, nil, 1, nil})
+	nc := withNaN.ValueCounts()
+	if nc["1"] != 2 {
+		t.Errorf("expected 1=2, got %d", nc["1"])
+	}
+	if nc["NaN"] != 2 {
+		t.Errorf("expected NaN=2, got %d", nc["NaN"])
+	}
+}
+
+func TestSeries_Unique(t *testing.T) {
+	tests := []struct {
+		input    Series
+		expected []string
+	}{
+		{
+			Strings([]string{"a", "b", "a", "c", "b"}),
+			[]string{"a", "b", "c"},
+		},
+		{
+			Ints([]int{3, 1, 2, 1, 3, 4}),
+			[]string{"3", "1", "2", "4"},
+		},
+		{
+			Strings([]string{}),
+			nil, // empty
+		},
+	}
+	for testnum, test := range tests {
+		got := test.input.Unique()
+		if test.expected == nil {
+			if got.Len() != 0 {
+				t.Errorf("Test:%v expected empty, got %v", testnum, got)
+			}
+			continue
+		}
+		if got.Len() != len(test.expected) {
+			t.Errorf("Test:%v length mismatch: expected %d got %d",
+				testnum, len(test.expected), got.Len())
+			continue
+		}
+		for i, exp := range test.expected {
+			if got.Elem(i).String() != exp {
+				t.Errorf("Test:%v[%d] expected %s got %s",
+					testnum, i, exp, got.Elem(i).String())
+			}
+		}
+	}
+}
+
+func TestSeries_NUnique(t *testing.T) {
+	tests := []struct {
+		input    Series
+		expected int
+	}{
+		{Strings([]string{"a", "b", "a", "c"}), 3},
+		{Ints([]int{1, 2, 2, 3, 1}), 3},
+		// NaN should not be counted.
+		{Ints([]interface{}{1, nil, 2, nil, 1}), 2},
+		// Empty.
+		{Strings([]string{}), 0},
+	}
+	for testnum, test := range tests {
+		got := test.input.NUnique()
+		if got != test.expected {
+			t.Errorf("Test:%v expected %d got %d", testnum, test.expected, got)
+		}
+	}
+}

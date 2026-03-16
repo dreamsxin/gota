@@ -3241,3 +3241,125 @@ func TestDataFrame_Pivot(t *testing.T) {
 		t.Fatalf("expect param error")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Tests for new NA / dedup methods added in the refactor
+// ---------------------------------------------------------------------------
+
+func TestDataFrame_DropNA(t *testing.T) {
+	df := New(
+		series.New([]interface{}{"a", nil, "c", nil}, series.String, "A"),
+		series.New([]interface{}{1, 2, nil, nil}, series.Int, "B"),
+	)
+
+	// "any": drop rows where ANY column is NaN → rows 1, 2, 3 dropped → only row 0 survives
+	got := df.DropNA(NAHowAny)
+	if got.Nrow() != 1 {
+		t.Errorf("DropNA any: expected 1 row, got %d", got.Nrow())
+	}
+
+	// "all": drop rows where ALL columns are NaN → only row 3 dropped
+	got2 := df.DropNA(NAHowAll)
+	if got2.Nrow() != 3 {
+		t.Errorf("DropNA all: expected 3 rows, got %d", got2.Nrow())
+	}
+
+	// subset: only examine column "A" with "any"
+	got3 := df.DropNA(NAHowAny, "A")
+	if got3.Nrow() != 2 {
+		t.Errorf("DropNA any subset A: expected 2 rows, got %d", got3.Nrow())
+	}
+
+	// Error propagation.
+	bad := DataFrame{Err: fmt.Errorf("bad")}
+	if bad.DropNA(NAHowAny).Err == nil {
+		t.Error("expected error to propagate")
+	}
+}
+
+func TestDataFrame_Duplicated(t *testing.T) {
+	df := New(
+		series.New([]string{"a", "b", "a", "c", "b"}, series.String, "X"),
+		series.New([]int{1, 2, 1, 3, 2}, series.Int, "Y"),
+	)
+	dups := df.Duplicated()
+	expected := []bool{false, false, true, false, true}
+	if !reflect.DeepEqual(dups, expected) {
+		t.Errorf("Duplicated: expected %v got %v", expected, dups)
+	}
+
+	// Subset on one column only.
+	dupsX := df.Duplicated("X")
+	expX := []bool{false, false, true, false, true}
+	if !reflect.DeepEqual(dupsX, expX) {
+		t.Errorf("Duplicated subset X: expected %v got %v", expX, dupsX)
+	}
+}
+
+func TestDataFrame_DropDuplicates(t *testing.T) {
+	df := New(
+		series.New([]string{"a", "b", "a", "c", "b"}, series.String, "X"),
+		series.New([]int{1, 2, 1, 3, 2}, series.Int, "Y"),
+	)
+	got := df.DropDuplicates()
+	if got.Nrow() != 3 {
+		t.Errorf("DropDuplicates: expected 3 rows, got %d", got.Nrow())
+	}
+	// First occurrence kept: rows 0, 1, 3.
+	wantX := []string{"a", "b", "c"}
+	for i, exp := range wantX {
+		if got.Col("X").Elem(i).String() != exp {
+			t.Errorf("DropDuplicates row %d X: expected %s got %s", i, exp, got.Col("X").Elem(i).String())
+		}
+	}
+}
+
+func TestDataFrame_FillNAStrategy(t *testing.T) {
+	df := New(
+		series.New([]interface{}{"a", nil, nil, "d"}, series.String, "A"),
+		series.New([]interface{}{1, nil, 3, nil}, series.Int, "B"),
+	)
+
+	// Forward fill.
+	ffill := df.FillNAStrategy(NAFillForward)
+	wantA := []string{"a", "a", "a", "d"}
+	for i, exp := range wantA {
+		if ffill.Col("A").Elem(i).String() != exp {
+			t.Errorf("ffill A[%d]: expected %s got %s", i, exp, ffill.Col("A").Elem(i).String())
+		}
+	}
+
+	// Backward fill.
+	bfill := df.FillNAStrategy(NAFillBackward)
+	wantB := []string{"a", "d", "d", "d"}
+	for i, exp := range wantB {
+		if bfill.Col("A").Elem(i).String() != exp {
+			t.Errorf("bfill A[%d]: expected %s got %s", i, exp, bfill.Col("A").Elem(i).String())
+		}
+	}
+
+	// Subset: only fill column "A", "B" should remain unchanged.
+	ffillSubset := df.FillNAStrategy(NAFillForward, "A")
+	if ffillSubset.Col("B").Elem(1).String() != "NaN" {
+		t.Errorf("ffill subset: B[1] should still be NaN, got %s", ffillSubset.Col("B").Elem(1).String())
+	}
+}
+
+func TestDataFrame_FillNaN(t *testing.T) {
+	df := New(
+		series.New([]interface{}{"x", nil, "z"}, series.String, "A"),
+	)
+	filled := df.FillNaN("A", series.Strings("fill"))
+	if filled.Col("A").Elem(1).String() != "fill" {
+		t.Errorf("FillNaN: expected 'fill', got %s", filled.Col("A").Elem(1).String())
+	}
+	// Non-existent column: FillNaN adds it as a new column (Mutate behaviour).
+	added := df.FillNaN("B", series.Strings("newval"))
+	if added.Err != nil {
+		t.Errorf("FillNaN with new column: unexpected error: %v", added.Err)
+	}
+	if added.Ncol() != 2 {
+		t.Errorf("FillNaN with new column: expected 2 cols, got %d", added.Ncol())
+	}
+}
+
