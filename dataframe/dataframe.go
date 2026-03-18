@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/dreamsxin/gota/series"
@@ -44,11 +43,16 @@ type DataFrame struct {
 }
 
 // New is the generic DataFrame constructor
+//
+// Performance note: This function copies all input Series.
+// For better performance with large datasets, consider using
+// NewNoCopy() if you can guarantee the input Series won't be modified.
 func New(se ...series.Series) DataFrame {
 	if len(se) == 0 {
 		return DataFrame{Err: fmt.Errorf("empty DataFrame")}
 	}
 
+	// Pre-allocate columns slice with exact capacity
 	columns := make([]series.Series, len(se))
 	for i, s := range se {
 		columns[i] = s.Copy()
@@ -59,6 +63,44 @@ func New(se ...series.Series) DataFrame {
 	}
 
 	// Fill DataFrame base structure
+	df := DataFrame{
+		columns: columns,
+		ncols:   ncols,
+		nrows:   nrows,
+	}
+	colnames := df.Names()
+	fixColnames(colnames)
+	for i, colname := range colnames {
+		df.columns[i].Name = colname
+	}
+	return df
+}
+
+// NewNoCopy creates a DataFrame without copying input Series.
+// This is more memory-efficient but requires that the input Series
+// are not modified after DataFrame creation.
+//
+// Use with caution: Only use when you control the input Series lifecycle.
+//
+// Example:
+//
+//	s1 := series.New([]int{1,2,3}, series.Int, "A")
+//	s2 := series.New([]float64{1.0,2.0,3.0}, series.Float, "B")
+//	df := dataframe.NewNoCopy(s1, s2) // No copy, more efficient
+func NewNoCopy(se ...series.Series) DataFrame {
+	if len(se) == 0 {
+		return DataFrame{Err: fmt.Errorf("empty DataFrame")}
+	}
+
+	// Use input slices directly without copying
+	columns := make([]series.Series, len(se))
+	copy(columns, se)
+
+	nrows, ncols, err := checkColumnsDimensions(columns...)
+	if err != nil {
+		return DataFrame{Err: err}
+	}
+
 	df := DataFrame{
 		columns: columns,
 		ncols:   ncols,
@@ -1342,6 +1384,8 @@ func parseType(s string) (series.Type, error) {
 }
 
 // LoadRecords creates a new DataFrame based on the given records.
+//
+// Performance optimization: Pre-allocates column slices to reduce memory allocations.
 func LoadRecords(records [][]string, options ...LoadOption) DataFrame {
 	// Set the default load options
 	cfg := loadOptions{
@@ -1370,7 +1414,8 @@ func LoadRecords(records [][]string, options ...LoadOption) DataFrame {
 	}
 
 	// Extract headers
-	headers := make([]string, len(records[0]))
+	numCols := len(records[0])
+	headers := make([]string, numCols)
 	if cfg.hasHeader {
 		headers = records[0]
 		records = records[1:]
@@ -1379,15 +1424,19 @@ func LoadRecords(records [][]string, options ...LoadOption) DataFrame {
 		headers = cfg.names
 	}
 
-	types := make([]series.Type, len(headers))
-	rawcols := make([][]string, len(headers))
+	numRows := len(records)
+	types := make([]series.Type, numCols)
+	rawcols := make([][]string, numCols)
+
+	// Pre-allocate column data with exact capacity
 	for i, colname := range headers {
-		rawcol := make([]string, len(records))
-		for j := 0; j < len(records); j++ {
-			rawcol[j] = records[j][i]
-			if findInStringSlice(rawcol[j], cfg.nanValues) != -1 {
-				rawcol[j] = "NaN"
+		rawcol := make([]string, numRows)
+		for j := 0; j < numRows; j++ {
+			val := records[j][i]
+			if findInStringSlice(val, cfg.nanValues) != -1 {
+				val = "NaN"
 			}
+			rawcol[j] = val
 		}
 		rawcols[i] = rawcol
 
@@ -1403,7 +1452,8 @@ func LoadRecords(records [][]string, options ...LoadOption) DataFrame {
 		types[i] = t
 	}
 
-	columns := make([]series.Series, len(headers))
+	// Pre-allocate columns slice
+	columns := make([]series.Series, numCols)
 	for i, colname := range headers {
 		col := series.New(rawcols[i], types[i], colname)
 		if col.Err != nil {
@@ -1411,10 +1461,12 @@ func LoadRecords(records [][]string, options ...LoadOption) DataFrame {
 		}
 		columns[i] = col
 	}
+
 	nrows, ncols, err := checkColumnsDimensions(columns...)
 	if err != nil {
 		return DataFrame{Err: err}
 	}
+
 	df := DataFrame{
 		columns: columns,
 		ncols:   ncols,
@@ -2595,15 +2647,6 @@ func fixColnames(colnames []string) {
 	}
 }
 
-func findInStringSlice(str string, s []string) int {
-	for i, e := range s {
-		if e == str {
-			return i
-		}
-	}
-	return -1
-}
-
 func parseSelectIndexes(l int, indexes SelectIndexes, colnames []string) ([]int, error) {
 	var idx []int
 	switch indexes.(type) {
@@ -2664,77 +2707,6 @@ func parseSelectIndexes(l int, indexes SelectIndexes, colnames []string) ([]int,
 		return nil, fmt.Errorf("indexing error: unknown indexing mode")
 	}
 	return idx, nil
-}
-
-func findType(arr []string) (series.Type, error) {
-	var hasFloats, hasInts, hasBools, hasTimes, hasStrings bool
-	for _, str := range arr {
-		if str == "" || str == "NaN" {
-			continue
-		}
-		if _, err := strconv.Atoi(str); err == nil {
-			hasInts = true
-			continue
-		}
-		if _, err := strconv.ParseFloat(str, 64); err == nil {
-			hasFloats = true
-			continue
-		}
-		if _, err := time.ParseInLocation(time.RFC3339, str, time.Local); err == nil {
-			hasTimes = true
-			continue
-		}
-		if str == "true" || str == "false" {
-			hasBools = true
-			continue
-		}
-		hasStrings = true
-	}
-
-	switch {
-	case hasStrings:
-		return series.String, nil
-	case hasBools:
-		return series.Bool, nil
-	case hasFloats:
-		return series.Float, nil
-	case hasInts:
-		return series.Int, nil
-	case hasTimes:
-		return series.Time, nil
-	default:
-		return series.String, fmt.Errorf("couldn't detect type")
-	}
-}
-
-func transposeRecords(x [][]string) [][]string {
-	n := len(x)
-	if n == 0 {
-		return x
-	}
-	m := len(x[0])
-	y := make([][]string, m)
-	for i := 0; i < m; i++ {
-		z := make([]string, n)
-		for j := 0; j < n; j++ {
-			z[j] = x[j][i]
-		}
-		y[i] = z
-	}
-	return y
-}
-
-func inIntSlice(i int, is []int) bool {
-	for _, v := range is {
-		if v == i {
-			return true
-		}
-	}
-	return false
-}
-
-func buildAggregatedColname(c string, typ AggregationType) string {
-	return fmt.Sprintf("%s_%s", c, typ)
 }
 
 // Matrix is an interface which is compatible with gonum's mat.Matrix interface
@@ -3033,36 +3005,4 @@ func (df DataFrame) buildNewCols(rows []string, generatedColnames []string, rowC
 		newColElements[i] = make([]series.Element, rowCnt)
 	}
 	return newColnames, newColElements
-}
-
-var defaultIntElem = series.New([]int{0}, series.Int, "").Elem(0)
-var defaultStringElem = series.New([]string{""}, series.String, "").Elem(0)
-var defaultFloatElem = series.New([]float64{0}, series.Float, "").Elem(0)
-var defaultBoolElem = series.New([]bool{false}, series.Bool, "").Elem(0)
-
-func getDefaultElem(tpe series.Type) series.Element {
-	switch tpe {
-	case series.String:
-		return defaultStringElem
-	case series.Int:
-		return defaultIntElem
-	case series.Float:
-		return defaultFloatElem
-	case series.Bool:
-		return defaultBoolElem
-	}
-	return nil
-}
-
-func strIndexInStrSlice(strSlice []string, str string) int {
-	for i, s := range strSlice {
-		if s == str {
-			return i
-		}
-	}
-	return -1
-}
-
-func isStrInStrSlice(strSlice []string, str string) bool {
-	return strIndexInStrSlice(strSlice, str) != -1
 }

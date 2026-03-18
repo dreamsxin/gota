@@ -3362,4 +3362,3 @@ func TestDataFrame_FillNaN(t *testing.T) {
 		t.Errorf("FillNaN with new column: expected 2 cols, got %d", added.Ncol())
 	}
 }
-

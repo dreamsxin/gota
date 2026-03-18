@@ -25,7 +25,7 @@ func (e *timeElement) Set(value interface{}) {
 		}
 		t, err := time.ParseInLocation(time.RFC3339, s, time.Local)
 		if err != nil {
-			fmt.Println("error parsing time:", err)
+			// Invalid time format is treated as NaN (no console output)
 			e.nan = true
 			return
 		}

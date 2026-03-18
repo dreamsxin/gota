@@ -5,11 +5,11 @@ import "math"
 // EWM holds parameters for Exponentially Weighted calculations, mirroring
 // pandas ewm().  Exactly one of Alpha/Span/HalfLife/COM must be non-zero.
 type EWM struct {
-	series    Series
-	alpha     float64 // smoothing factor in (0,1]
-	adjust    bool    // pandas adjust=True: use expanding weights (default)
-	ignoreNA  bool    // skip NaN in weight calculation
-	minPeriods int    // minimum observations to produce a result
+	series     Series
+	alpha      float64 // smoothing factor in (0,1]
+	adjust     bool    // pandas adjust=True: use expanding weights (default)
+	ignoreNA   bool    // skip NaN in weight calculation
+	minPeriods int     // minimum observations to produce a result
 }
 
 // EWM creates a new EWM object.  span is the most common parameter (like pandas

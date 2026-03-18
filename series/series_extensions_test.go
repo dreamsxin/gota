@@ -275,5 +275,3 @@ func TestSeries_Cov(t *testing.T) {
 		t.Errorf("Cov with NaN pairs: got NaN, expected a real value")
 	}
 }
-
-

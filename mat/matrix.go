@@ -1,6 +1,8 @@
 package mat
 
 import (
+	"fmt"
+
 	"github.com/dreamsxin/gota/series"
 )
 
@@ -21,135 +23,203 @@ const (
 	ModeOne  Mode = "one"
 )
 
+// Cal performs element-wise calculation between two series with padding mode.
+// It validates inputs and handles length mismatches according to mod parameter.
 func Cal(a series.Series, b series.Series, op Type, mod Mode) series.Series {
-	var c series.Series
+	// Validate inputs
+	if a.Err != nil {
+		ret := series.New([]interface{}{}, series.Float, "")
+		ret.Err = fmt.Errorf("mat.Cal: input a has error: %v", a.Err)
+		return ret
+	}
+	if b.Err != nil {
+		ret := series.New([]interface{}{}, series.Float, "")
+		ret.Err = fmt.Errorf("mat.Cal: input b has error: %v", b.Err)
+		return ret
+	}
+
 	la := a.Len()
 	lb := b.Len()
+
+	// Create copies to avoid modifying originals
+	acopy := a.Copy()
+	bcopy := b.Copy()
+
+	// Handle length mismatch according to mode
 	switch mod {
 	case ModeZero:
 		if la > lb {
-			b.Fill(la, 0)
+			bcopy.Fill(la, 0)
 		} else if la < lb {
-			a.Fill(lb, 0)
+			acopy.Fill(lb, 0)
 		}
 	case ModeOne:
 		if la > lb {
-			b.Fill(la, 1)
+			bcopy.Fill(la, 1)
 		} else if la < lb {
-			a.Fill(lb, 1)
+			acopy.Fill(lb, 1)
 		}
+		// ModeNone: keep original lengths, operations will handle mismatch
 	}
 
+	// Perform operation
+	var c series.Series
 	switch op {
 	case TypeMul:
-		c = Mul(a, b)
+		c = Mul(acopy, bcopy)
 	case TypeDiv:
-		c = Div(a, b)
+		c = Div(acopy, bcopy)
 	case TypeSub:
-		c = Sub(a, b)
+		c = Sub(acopy, bcopy)
 	case TypeAdd:
-		c = Add(a, b)
-	}
-	return c
-}
-
-func Mul(a series.Series, b series.Series) series.Series {
-	var c series.Series
-	if a.Type() != series.Int || b.Type() != series.Int {
-		c = series.Floats([]float64{})
-		av := a.Float()
-		for i, v := range b.Float() {
-			c.Append(av[i] * v)
-		}
-	} else {
-		c = series.Ints([]int64{})
-		av := a.Int64()
-		for i, v := range b.Int64() {
-			c.Append(av[i] * v)
-		}
-	}
-	return c
-}
-
-func Div(a series.Series, b series.Series) series.Series {
-	var c series.Series
-	c = series.Floats([]float64{})
-	av := a.Float()
-	for i, v := range b.Float() {
-		if v != 0 {
-			c.Append(av[i] / v)
-		} else {
-			c.Append(0)
-		}
-	}
-	return c
-}
-
-func Sub(a series.Series, b series.Series) series.Series {
-	var c series.Series
-	switch a.Type() {
-	case series.Float:
-		c = series.Floats([]float64{})
-		av := a.Float()
-		for i, v := range b.Float() {
-			c.Append(av[i] - v)
-		}
+		c = Add(acopy, bcopy)
 	default:
-		c = series.Ints([]int64{})
-		av := a.Int64()
-		for i, v := range b.Int64() {
-			c.Append(av[i] - v)
-		}
+		ret := series.New([]interface{}{}, series.Float, "")
+		ret.Err = fmt.Errorf("mat.Cal: unknown operation type: %v", op)
+		return ret
 	}
+
 	return c
 }
 
-func Add(a series.Series, b series.Series) series.Series {
-	var c series.Series
+// Mul performs element-wise multiplication of two series.
+// Returns Float series if either input is Float, otherwise Int series.
+// Handles length mismatch by using minimum length.
+func Mul(a series.Series, b series.Series) series.Series {
 	la := a.Len()
 	lb := b.Len()
-	switch a.Type() {
-	case series.Float:
-		c = series.Floats([]float64{})
+	minLen := la
+	if lb < minLen {
+		minLen = lb
+	}
+
+	// Determine result type based on input types
+	resultIsFloat := a.Type() == series.Float || b.Type() == series.Float
+
+	if resultIsFloat {
+		c := series.Floats([]float64{})
+		av := a.Float()
+		bv := b.Float()
+		for i := 0; i < minLen; i++ {
+			c.Append(av[i] * bv[i])
+		}
+		return c
+	}
+
+	c := series.Ints([]int64{})
+	av := a.Int64()
+	bv := b.Int64()
+	for i := 0; i < minLen; i++ {
+		c.Append(av[i] * bv[i])
+	}
+	return c
+}
+
+// Div performs element-wise division of two series.
+// Always returns Float series. Division by zero results in 0.
+// Handles length mismatch by using minimum length.
+func Div(a series.Series, b series.Series) series.Series {
+	la := a.Len()
+	lb := b.Len()
+	minLen := la
+	if lb < minLen {
+		minLen = lb
+	}
+
+	c := series.Floats([]float64{})
+	av := a.Float()
+	bv := b.Float()
+	for i := 0; i < minLen; i++ {
+		if bv[i] != 0 {
+			c.Append(av[i] / bv[i])
+		} else {
+			c.Append(0.0)
+		}
+	}
+	return c
+}
+
+// Sub performs element-wise subtraction of two series (a - b).
+// Returns Float series if a is Float, otherwise Int series.
+// Handles length mismatch by using minimum length.
+func Sub(a series.Series, b series.Series) series.Series {
+	la := a.Len()
+	lb := b.Len()
+	minLen := la
+	if lb < minLen {
+		minLen = lb
+	}
+
+	if a.Type() == series.Float {
+		c := series.Floats([]float64{})
+		av := a.Float()
+		bv := b.Float()
+		for i := 0; i < minLen; i++ {
+			c.Append(av[i] - bv[i])
+		}
+		return c
+	}
+
+	c := series.Ints([]int64{})
+	av := a.Int64()
+	bv := b.Int64()
+	for i := 0; i < minLen; i++ {
+		c.Append(av[i] - bv[i])
+	}
+	return c
+}
+
+// Add performs element-wise addition of two series.
+// Returns Float series if a is Float, otherwise Int series.
+// Handles length mismatch by appending remaining elements from longer series.
+func Add(a series.Series, b series.Series) series.Series {
+	la := a.Len()
+	lb := b.Len()
+
+	if a.Type() == series.Float {
+		c := series.Floats([]float64{})
+		av := a.Float()
+		bv := b.Float()
+
 		if la >= lb {
-			bv := b.Float()
-			for i, v := range a.Float() {
+			for i := 0; i < la; i++ {
 				if i >= lb {
-					c.Append(v)
+					c.Append(av[i])
 					continue
 				}
-				c.Append(v + bv[i])
+				c.Append(av[i] + bv[i])
 			}
 		} else {
-			av := a.Float()
-			for i, v := range b.Float() {
+			for i := 0; i < lb; i++ {
 				if i >= la {
-					c.Append(v)
+					c.Append(bv[i])
 					continue
 				}
-				c.Append(av[i] + v)
+				c.Append(av[i] + bv[i])
 			}
 		}
-	default:
-		c = series.Ints([]int64{})
-		if la >= lb {
-			bv := b.Int64()
-			for i, v := range a.Int64() {
-				if i >= lb {
-					c.Append(v)
-					continue
-				}
-				c.Append(v + bv[i])
+		return c
+	}
+
+	c := series.Ints([]int64{})
+	av := a.Int64()
+	bv := b.Int64()
+
+	if la >= lb {
+		for i := 0; i < la; i++ {
+			if i >= lb {
+				c.Append(av[i])
+				continue
 			}
-		} else {
-			av := a.Int64()
-			for i, v := range b.Int64() {
-				if i >= la {
-					c.Append(v)
-					continue
-				}
-				c.Append(av[i] + v)
+			c.Append(av[i] + bv[i])
+		}
+	} else {
+		for i := 0; i < lb; i++ {
+			if i >= la {
+				c.Append(bv[i])
+				continue
 			}
+			c.Append(av[i] + bv[i])
 		}
 	}
 	return c

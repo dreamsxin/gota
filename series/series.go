@@ -452,8 +452,6 @@ func (s Series) FillNaNBackward() Series {
 	return result
 }
 
-
-
 // Compare compares the values of a Series with other elements. To do so, the
 // elements with are to be compared are first transformed to a Series of the same
 // type as the caller.
@@ -1242,4 +1240,3 @@ func (s Series) Cov(other Series) float64 {
 	fc := float64(count)
 	return (sumXY - sumX*sumY/fc) / (fc - 1)
 }
-

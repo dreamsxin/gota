@@ -98,9 +98,9 @@ func sqlTypeToSeriesType(dbTypeName string) series.Type {
 type SQLInsertOption func(*sqlInsertOptions)
 
 type sqlInsertOptions struct {
-	batchSize    int    // rows per INSERT statement (default 500)
-	createTable  bool   // create the table if it doesn't exist
-	truncateFirst bool  // TRUNCATE / DELETE FROM before inserting
+	batchSize     int  // rows per INSERT statement (default 500)
+	createTable   bool // create the table if it doesn't exist
+	truncateFirst bool // TRUNCATE / DELETE FROM before inserting
 }
 
 // WithBatchSize sets how many rows are inserted per statement.

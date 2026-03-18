@@ -208,4 +208,3 @@ func TestMatrix_Cal_ModeOne(t *testing.T) {
 		t.Errorf("Cal ModeOne Mul: expected %v got %v", expected, got.Records())
 	}
 }
-
