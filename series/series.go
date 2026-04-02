@@ -274,6 +274,8 @@ func (s *Series) Fill(num int, values interface{}) {
 			s.elements = append(s.elements.(floatElements), news.elements.(floatElements)...)
 		case Bool:
 			s.elements = append(s.elements.(boolElements), news.elements.(boolElements)...)
+		case Time:
+			s.elements = append(s.elements.(timeElements), news.elements.(timeElements)...)
 		}
 	}
 }
@@ -294,6 +296,8 @@ func (s *Series) Append(values interface{}) {
 		s.elements = append(s.elements.(floatElements), news.elements.(floatElements)...)
 	case Bool:
 		s.elements = append(s.elements.(boolElements), news.elements.(boolElements)...)
+	case Time:
+		s.elements = append(s.elements.(timeElements), news.elements.(timeElements)...)
 	}
 }
 
@@ -349,6 +353,12 @@ func (s Series) Subset(indexes Indexes) Series {
 		elements := make(boolElements, len(idx))
 		for k, i := range idx {
 			elements[k] = s.elements.(boolElements)[i]
+		}
+		ret.elements = elements
+	case Time:
+		elements := make(timeElements, len(idx))
+		for k, i := range idx {
+			elements[k] = s.elements.(timeElements)[i]
 		}
 		ret.elements = elements
 	default:
@@ -596,6 +606,9 @@ func (s Series) Copy() Series {
 	case Int:
 		elements = make(intElements, s.Len())
 		copy(elements.(intElements), s.elements.(intElements))
+	case Time:
+		elements = make(timeElements, s.Len())
+		copy(elements.(timeElements), s.elements.(timeElements))
 	}
 	ret := Series{
 		Name:     name,

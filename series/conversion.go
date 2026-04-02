@@ -32,8 +32,8 @@ func BatchConvert[T any](src []T, dst Type, name string) Series {
 }
 
 func batchConvertToInt[T any](src []T, name string) Series {
-	elems := GetIntElements(len(src))
-	defer PutIntElements(elems)
+	n := len(src)
+	elems := make(intElements, n)
 
 	for i, v := range src {
 		switch val := any(v).(type) {
@@ -44,8 +44,8 @@ func batchConvertToInt[T any](src []T, name string) Series {
 		case float64:
 			elems[i] = intElement{e: int64(val), nan: false}
 		case string:
-			if i, err := strconv.Atoi(val); err == nil {
-				elems[i] = intElement{e: int64(i), nan: false}
+			if parsed, err := strconv.Atoi(val); err == nil {
+				elems[i] = intElement{e: int64(parsed), nan: false}
 			} else {
 				elems[i] = intElement{e: 0, nan: true}
 			}
@@ -54,17 +54,12 @@ func batchConvertToInt[T any](src []T, name string) Series {
 		}
 	}
 
-	result := Series{
-		Name:     name,
-		elements: intElements(elems),
-		t:        Int,
-	}
-	return result
+	return Series{Name: name, elements: elems, t: Int}
 }
 
 func batchConvertToFloat[T any](src []T, name string) Series {
-	elems := GetFloatElements(len(src))
-	defer PutFloatElements(elems)
+	n := len(src)
+	elems := make(floatElements, n)
 
 	for i, v := range src {
 		switch val := any(v).(type) {
@@ -87,17 +82,12 @@ func batchConvertToFloat[T any](src []T, name string) Series {
 		}
 	}
 
-	result := Series{
-		Name:     name,
-		elements: floatElements(elems),
-		t:        Float,
-	}
-	return result
+	return Series{Name: name, elements: elems, t: Float}
 }
 
 func batchConvertToString[T any](src []T, name string) Series {
-	elems := GetStringElements(len(src))
-	defer PutStringElements(elems)
+	n := len(src)
+	elems := make(stringElements, n)
 
 	for i, v := range src {
 		switch val := any(v).(type) {
@@ -110,17 +100,12 @@ func batchConvertToString[T any](src []T, name string) Series {
 		}
 	}
 
-	result := Series{
-		Name:     name,
-		elements: stringElements(elems),
-		t:        String,
-	}
-	return result
+	return Series{Name: name, elements: elems, t: String}
 }
 
 func batchConvertToBool[T any](src []T, name string) Series {
-	elems := GetBoolElements(len(src))
-	defer PutBoolElements(elems)
+	n := len(src)
+	elems := make(boolElements, n)
 
 	for i, v := range src {
 		switch val := any(v).(type) {
@@ -137,17 +122,12 @@ func batchConvertToBool[T any](src []T, name string) Series {
 		}
 	}
 
-	result := Series{
-		Name:     name,
-		elements: boolElements(elems),
-		t:        Bool,
-	}
-	return result
+	return Series{Name: name, elements: elems, t: Bool}
 }
 
 func batchConvertToTime[T any](src []T, name string) Series {
-	elems := GetTimeElements(len(src))
-	defer PutTimeElements(elems)
+	n := len(src)
+	elems := make(timeElements, n)
 
 	for i, v := range src {
 		switch val := any(v).(type) {
@@ -168,12 +148,7 @@ func batchConvertToTime[T any](src []T, name string) Series {
 		}
 	}
 
-	result := Series{
-		Name:     name,
-		elements: timeElements(elems),
-		t:        Time,
-	}
-	return result
+	return Series{Name: name, elements: elems, t: Time}
 }
 
 // BatchConvertInts converts []int to Series with specified type

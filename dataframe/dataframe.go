@@ -561,13 +561,20 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 		return DataFrame{Err: fmt.Errorf("Aggregation: input is nil")}
 	}
 	if len(typs) != len(colnames) {
-		return DataFrame{Err: fmt.Errorf("Aggregation: len(typs) != len(colanmes)")}
+		return DataFrame{Err: fmt.Errorf("Aggregation: len(typs) != len(colnames)")}
 	}
-	dfMaps := make([]map[string]interface{}, 0)
+	if len(gps.groups) == 0 {
+		return DataFrame{Err: fmt.Errorf("Aggregation: no groups")}
+	}
+	dfMaps := make([]map[string]interface{}, 0, len(gps.groups))
 	for _, df := range gps.groups {
-		targetMap := df.Maps()[0]
+		rows := df.Maps()
+		if len(rows) == 0 {
+			continue
+		}
+		targetMap := rows[0]
 		curMap := make(map[string]interface{})
-		// add columns of  group by
+		// add columns of group by
 		for _, c := range gps.colnames {
 			if value, ok := targetMap[c]; ok {
 				curMap[c] = value
@@ -579,7 +586,7 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 		for i, c := range colnames {
 			curSeries := df.Col(c)
 			if curSeries.Err != nil {
-				curMap[fmt.Sprintf("%s_%s", c, typs[i])] = nil
+				curMap[buildAggregatedColname(c, typs[i])] = nil
 				continue
 			}
 			var value float64
@@ -599,27 +606,27 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 			case Aggregation_COUNT:
 				value = float64(curSeries.Len())
 			default:
-				return DataFrame{Err: fmt.Errorf("Aggregation: this method %s not found", typs[i])}
-
+				return DataFrame{Err: fmt.Errorf("Aggregation: method %s not found", typs[i])}
 			}
 			curMap[buildAggregatedColname(c, typs[i])] = value
 		}
 		dfMaps = append(dfMaps, curMap)
-
 	}
 
-	// Save column types
+	if len(dfMaps) == 0 {
+		return DataFrame{Err: fmt.Errorf("Aggregation: no data after aggregation")}
+	}
+
+	// Infer column types from the first result row.
 	colTypes := map[string]series.Type{}
-	for k := range dfMaps[0] {
-		switch dfMaps[0][k].(type) {
+	for k, v := range dfMaps[0] {
+		switch v.(type) {
 		case string:
 			colTypes[k] = series.String
 		case int, int16, int32, int64:
 			colTypes[k] = series.Int
 		case float32, float64:
 			colTypes[k] = series.Float
-		default:
-			continue
 		}
 	}
 
@@ -2764,6 +2771,11 @@ func (df DataFrame) Describe() DataFrame {
 				col.Max(),
 			},
 				series.Float,
+				col.Name,
+			)
+		case series.Time:
+			newCol = series.New([]string{"-", "-", "-", "-", "-", "-", "-", "-"},
+				series.String,
 				col.Name,
 			)
 		}
