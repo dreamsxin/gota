@@ -803,3 +803,55 @@ func (df DataFrame) Explode(colname string) DataFrame {
 	}
 	return New(newCols...)
 }
+
+// ============================================================================
+// RenameAll — batch column rename
+// ============================================================================
+
+// RenameAll renames multiple columns at once using a map of old→new names.
+// Columns not in the map are left unchanged. Returns an error if any old name
+// is not found.
+//
+// Example:
+//
+//	df2, err := df.RenameAll(map[string]string{
+//	    "COL.1": "name",
+//	    "COL.2": "age",
+//	})
+func (df DataFrame) RenameAll(mapping map[string]string) (DataFrame, error) {
+	if df.Err != nil {
+		return df, df.Err
+	}
+	result := df.Copy()
+	for oldName, newName := range mapping {
+		idx := result.ColIndex(oldName)
+		if idx < 0 {
+			return DataFrame{}, fmt.Errorf("RenameAll: column %q not found", oldName)
+		}
+		result.columns[idx].Name = newName
+	}
+	return result, nil
+}
+
+// ============================================================================
+// AsCategorical — DataFrame-level Categorical integration
+// ============================================================================
+
+// AsCategorical converts the named String column to a series.Categorical and
+// returns it. The DataFrame itself is unchanged; use the returned Categorical
+// for memory-efficient operations on low-cardinality columns.
+//
+// Example:
+//
+//	cat, err := df.AsCategorical("country")
+//	fmt.Println(cat.NCategories(), "distinct countries")
+func (df DataFrame) AsCategorical(colname string) (series.Categorical, error) {
+	if df.Err != nil {
+		return series.Categorical{}, df.Err
+	}
+	col := df.Col(colname)
+	if col.Err != nil {
+		return series.Categorical{}, fmt.Errorf("AsCategorical: %v", col.Err)
+	}
+	return series.CategoricalFromSeries(col)
+}

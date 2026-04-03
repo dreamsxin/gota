@@ -2,6 +2,7 @@ package mat
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/dreamsxin/gota/series"
 )
@@ -116,7 +117,7 @@ func Mul(a series.Series, b series.Series) series.Series {
 }
 
 // Div performs element-wise division of two series.
-// Always returns Float series. Division by zero results in 0.
+// Always returns Float series. Division by zero results in NaN (not 0).
 // Handles length mismatch by using minimum length.
 func Div(a series.Series, b series.Series) series.Series {
 	la := a.Len()
@@ -130,10 +131,10 @@ func Div(a series.Series, b series.Series) series.Series {
 	av := a.Float()
 	bv := b.Float()
 	for i := 0; i < minLen; i++ {
-		if bv[i] != 0 {
-			c.Append(av[i] / bv[i])
+		if bv[i] == 0 {
+			c.Append(math.NaN())
 		} else {
-			c.Append(0.0)
+			c.Append(av[i] / bv[i])
 		}
 	}
 	return c

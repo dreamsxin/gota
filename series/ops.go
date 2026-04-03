@@ -116,3 +116,167 @@ func (s Series) IsIn(values []interface{}) Series {
 	result.Name = s.Name
 	return result
 }
+
+// ============================================================================
+// Math operations
+// ============================================================================
+
+// Abs returns a new Float Series with the absolute value of each element.
+// Non-numeric types are returned as NaN.
+//
+// Example:
+//
+//	s.Abs()
+func (s Series) Abs() Series {
+	if s.Err != nil {
+		return s
+	}
+	floats := s.Float()
+	out := make([]float64, len(floats))
+	for i, v := range floats {
+		out[i] = math.Abs(v)
+	}
+	result := Floats(out)
+	result.Name = s.Name
+	return result
+}
+
+// Round returns a new Float Series with each element rounded to the given
+// number of decimal places. Negative places rounds to tens, hundreds, etc.
+//
+// Example:
+//
+//	s.Round(2)  // round to 2 decimal places
+//	s.Round(0)  // round to nearest integer
+func (s Series) Round(places int) Series {
+	if s.Err != nil {
+		return s
+	}
+	floats := s.Float()
+	factor := math.Pow(10, float64(places))
+	out := make([]float64, len(floats))
+	for i, v := range floats {
+		if math.IsNaN(v) {
+			out[i] = v
+		} else {
+			out[i] = math.Round(v*factor) / factor
+		}
+	}
+	result := Floats(out)
+	result.Name = s.Name
+	return result
+}
+
+// Sign returns a new Float Series with the sign of each element:
+// -1 for negative, 0 for zero, +1 for positive, NaN for NaN.
+//
+// Example:
+//
+//	s.Sign()
+func (s Series) Sign() Series {
+	if s.Err != nil {
+		return s
+	}
+	floats := s.Float()
+	out := make([]float64, len(floats))
+	for i, v := range floats {
+		switch {
+		case math.IsNaN(v):
+			out[i] = math.NaN()
+		case v > 0:
+			out[i] = 1
+		case v < 0:
+			out[i] = -1
+		default:
+			out[i] = 0
+		}
+	}
+	result := Floats(out)
+	result.Name = s.Name
+	return result
+}
+
+// Pow returns a new Float Series with each element raised to the given power.
+//
+// Example:
+//
+//	s.Pow(2)  // square each element
+func (s Series) Pow(exp float64) Series {
+	if s.Err != nil {
+		return s
+	}
+	floats := s.Float()
+	out := make([]float64, len(floats))
+	for i, v := range floats {
+		out[i] = math.Pow(v, exp)
+	}
+	result := Floats(out)
+	result.Name = s.Name
+	return result
+}
+
+// Sqrt returns a new Float Series with the square root of each element.
+// Negative values produce NaN.
+//
+// Example:
+//
+//	s.Sqrt()
+func (s Series) Sqrt() Series {
+	if s.Err != nil {
+		return s
+	}
+	floats := s.Float()
+	out := make([]float64, len(floats))
+	for i, v := range floats {
+		out[i] = math.Sqrt(v)
+	}
+	result := Floats(out)
+	result.Name = s.Name
+	return result
+}
+
+// Log returns a new Float Series with the natural logarithm of each element.
+// Non-positive values produce NaN.
+func (s Series) Log() Series {
+	if s.Err != nil {
+		return s
+	}
+	floats := s.Float()
+	out := make([]float64, len(floats))
+	for i, v := range floats {
+		out[i] = math.Log(v)
+	}
+	result := Floats(out)
+	result.Name = s.Name
+	return result
+}
+
+// Log10 returns a new Float Series with the base-10 logarithm of each element.
+func (s Series) Log10() Series {
+	if s.Err != nil {
+		return s
+	}
+	floats := s.Float()
+	out := make([]float64, len(floats))
+	for i, v := range floats {
+		out[i] = math.Log10(v)
+	}
+	result := Floats(out)
+	result.Name = s.Name
+	return result
+}
+
+// Exp returns a new Float Series with e raised to each element.
+func (s Series) Exp() Series {
+	if s.Err != nil {
+		return s
+	}
+	floats := s.Float()
+	out := make([]float64, len(floats))
+	for i, v := range floats {
+		out[i] = math.Exp(v)
+	}
+	result := Floats(out)
+	result.Name = s.Name
+	return result
+}

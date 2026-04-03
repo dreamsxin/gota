@@ -115,17 +115,22 @@ Status markers: ✅ done · 🔧 partial / needs polish · ❌ not started
 - ✅ JSON Lines (`ndjson`) — `ReadNDJSON` / `WriteNDJSON`
 
 ### v1.6 — Type System
-- ✅ `Categorical` type — dictionary-encoded low-cardinality string column with `NewCategorical`, `CategoricalFromSeries`, `ToSeries`, `ValueCounts`, `Filter`, `SetValue`, `AddCategory`, `MemoryBytes`
+- ✅ `Categorical` type — dictionary-encoded low-cardinality string column
+- ✅ `Series.Abs`, `Round`, `Sign`, `Pow`, `Sqrt`, `Log`, `Log10`, `Exp` — math operations
+- ✅ `DataFrame.RenameAll(map)` — batch column rename
+- ✅ `DataFrame.AsCategorical(col)` — DataFrame-level Categorical integration
+- ✅ `WriteXLSXMultiSheet` — multi-sheet XLSX output
 - ❌ Nullable typed columns (`Int64?`, `Float64?`) without boxing every element
 - ❌ `Decimal` type for exact fixed-point arithmetic (financial use cases)
 - ❌ Reduce `interface{}` usage — migrate to typed generics where Go version allows
 
 ### Bug Fixes (post v1.5)
-- ✅ `Query`: operator search now requires word boundaries — column names like `income`, `bandwidth`, `order_count` no longer misfire
-- ✅ `GetGroups` / `Apply`: hidden `__groupby_row_idx__` column stripped before returning to caller
-- ✅ `Unstack`: returns error on empty `idVars` instead of panicking
-- ✅ `ScanCSV`: batch slice copied before passing to `LoadRecords` — prevents data corruption across batch windows
-- ✅ `ReadNDJSON`: scanner buffer raised to 10 MB — handles large JSON objects per line
+- ✅ `Query`: operator search now requires word boundaries
+- ✅ `GetGroups` / `Apply`: hidden `__groupby_row_idx__` column stripped
+- ✅ `Unstack`: returns error on empty `idVars`
+- ✅ `ScanCSV`: batch slice copied before `LoadRecords`
+- ✅ `ReadNDJSON`: scanner buffer raised to 10 MB
+- ✅ `mat.Div`: division by zero returns NaN instead of 0
 
 ### Long-term / Research
 - ❌ Distributed DataFrame (chunked across goroutines or nodes)

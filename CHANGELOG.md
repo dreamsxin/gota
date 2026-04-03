@@ -5,7 +5,67 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 This document follows
 [markdownlint](https://github.com/markdownlint/markdownlint) formatting rules.
 
-## [0.12.0] - 2021-10-10
+## [Unreleased] — v1.3 / v1.4 / v1.5 / v1.6
+
+### Added
+
+#### DataFrame
+- `Shift(periods, subset...)` — shift column values by n rows (NaN fill)
+- `Assign(name, fn)` — add or replace a column via a function
+- `Explode(col)` — expand comma-separated column into multiple rows
+- `Query(expr)` — expression-based row filter (`col op val`, AND/OR, in/not in)
+- `Stack` / `Unstack` — wide↔long reshape (Stack is an alias for Melt)
+- `Resample(colname, freq)` — time-based grouping (D/W/M/Y/H) with `Aggregation`
+- `CapplyParallel` — parallel column-wise apply using GOMAXPROCS goroutines
+- `RapplyParallel` — parallel row-wise apply, row order preserved
+- `AggregationParallel` — parallel GroupBy aggregation
+- `RenameAll(map)` — batch column rename
+- `AsCategorical(col)` — convert a String column to `series.Categorical`
+- `WriteXLSXMultiSheet` — write multiple DataFrames to separate sheets
+- `ReadXLSX` / `ReadXLSXFile` now accept `WithSheet(name)` option
+- `WriteSQL` now accepts `WithPlaceholderStyle` for PostgreSQL (`$1`) and SQL Server (`@p1`)
+- `ScanCSV(r, batchSize, fn)` — streaming CSV reader for large files
+- `ReadNDJSON` / `WriteNDJSON` — JSON Lines (NDJSON) read/write
+- `GroupBy.Transform` now preserves original row order via hidden index column
+- `GroupBy` key builder supports all types including `Time`
+
+#### Series
+- `Clip(lower, upper)` — element-wise value clipping
+- `Replace(from, to)` — element-wise value replacement
+- `Between(left, right, inclusive)` — range check returning Bool Series
+- `IsIn(values)` — membership test returning Bool Series
+- `Abs()`, `Round(places)`, `Sign()`, `Pow(exp)`, `Sqrt()`, `Log()`, `Log10()`, `Exp()` — math operations
+- `Categorical` type — dictionary-encoded low-cardinality string column
+
+#### I/O
+- Excel: `WithSheet(name)` option for `ReadXLSX`
+- Excel: `WriteXLSXMultiSheet` for multi-sheet workbooks
+- SQL: `WithPlaceholderStyle` for named placeholders
+- CSV: `ScanCSV` streaming mode
+- NDJSON: `ReadNDJSON` / `WriteNDJSON`
+
+### Fixed
+- `series.Copy` / `Append` / `Subset` / `Fill` missing `Time` type branch (silent data loss)
+- `BatchConvert` pool use-after-free (elements returned to pool while Series still held reference)
+- `Aggregation` panic on empty groups (`dfMaps[0]` index out of range)
+- `Describe` panic on `Time` columns (missing type branch)
+- `Rolling.StdDev` rewritten with Welford's online algorithm (O(n), was O(n·w))
+- `EWM.Var` / `EWM.Std` rewritten with pandas-compatible weighted Bessel correction
+- `Sample` without replacement no longer sorts result indexes (preserves sampled order)
+- `Info` memory estimate uses actual string lengths for String columns
+- `GroupBy.GetGroups` / `Apply` strip hidden `__groupby_row_idx__` column from results
+- `Query` operator search uses word-boundary matching — column names like `income`, `bandwidth` no longer misfire
+- `Unstack` returns error on empty `idVars` instead of panicking
+- `ScanCSV` batch slice copied before `LoadRecords` — prevents cross-batch data corruption
+- `ReadNDJSON` scanner buffer raised to 10 MB
+- `mat.Div` division by zero now returns NaN instead of 0
+
+### Changed
+- `pool.go` element pool helpers (`GetXxxElements` etc.) made unexported
+- `Describe` shows min/max RFC3339 timestamps for `Time` columns
+- `GroupBy` key builder uses `fmt.Sprintf("%v", ...)` — supports all types
+
+
 
 ### Added in 0.12.0
 

@@ -143,3 +143,103 @@ func (df DataFrame) WriteXLSXFile(path string, options ...WriteOption) error {
 	defer f.Close()
 	return df.WriteXLSX(f, options...)
 }
+
+// WriteXLSXSheet writes the DataFrame to a specific sheet in an existing
+// excelize.File. This allows building multi-sheet workbooks.
+//
+// Example:
+//
+//	f := excelize.NewFile()
+//	defer f.Close()
+//	df1.WriteXLSXSheet(f, "Sales")
+//	df2.WriteXLSXSheet(f, "Inventory")
+//	f.SaveAs("report.xlsx")
+func (df DataFrame) WriteXLSXSheet(f interface{ SetCellValue(string, string, interface{}) error; NewSheet(string) (int, error) }, sheetName string, options ...WriteOption) error {
+	if df.Err != nil {
+		return df.Err
+	}
+	cfg := writeOptions{writeHeader: true}
+	for _, opt := range options {
+		opt(&cfg)
+	}
+
+	xl, ok := f.(*excelize.File)
+	if !ok {
+		return fmt.Errorf("WriteXLSXSheet: f must be *excelize.File")
+	}
+
+	// Create sheet if it doesn't exist.
+	idx, _ := xl.GetSheetIndex(sheetName)
+	if idx == -1 {
+		if _, err := xl.NewSheet(sheetName); err != nil {
+			return fmt.Errorf("WriteXLSXSheet: %v", err)
+		}
+	}
+
+	records := df.Records()
+	startRow := 0
+	if !cfg.writeHeader {
+		startRow = 1
+	}
+	for i := startRow; i < len(records); i++ {
+		for j, cell := range records[i] {
+			coord, err := excelize.CoordinatesToCellName(j+1, i-startRow+1)
+			if err != nil {
+				return fmt.Errorf("WriteXLSXSheet: %v", err)
+			}
+			if err := xl.SetCellValue(sheetName, coord, cell); err != nil {
+				return fmt.Errorf("WriteXLSXSheet: %v", err)
+			}
+		}
+	}
+	return nil
+}
+
+// WriteXLSXMultiSheet writes multiple DataFrames to separate sheets in a
+// single XLSX file. sheets is a slice of (sheetName, DataFrame) pairs.
+//
+// Example:
+//
+//	err := dataframe.WriteXLSXMultiSheet(w,
+//	    dataframe.SheetData{"Sales", salesDF},
+//	    dataframe.SheetData{"Inventory", invDF},
+//	)
+type SheetData struct {
+	Name string
+	DF   DataFrame
+}
+
+func WriteXLSXMultiSheet(w io.Writer, sheets ...SheetData) error {
+	if len(sheets) == 0 {
+		return fmt.Errorf("WriteXLSXMultiSheet: no sheets provided")
+	}
+	f := excelize.NewFile()
+	defer f.Close()
+
+	for i, sd := range sheets {
+		if i == 0 {
+			// Rename the default Sheet1.
+			if err := f.SetSheetName("Sheet1", sd.Name); err != nil {
+				return fmt.Errorf("WriteXLSXMultiSheet: rename sheet: %v", err)
+			}
+		} else {
+			if _, err := f.NewSheet(sd.Name); err != nil {
+				return fmt.Errorf("WriteXLSXMultiSheet: new sheet %q: %v", sd.Name, err)
+			}
+		}
+		records := sd.DF.Records()
+		for ri, row := range records {
+			for ci, cell := range row {
+				coord, err := excelize.CoordinatesToCellName(ci+1, ri+1)
+				if err != nil {
+					return fmt.Errorf("WriteXLSXMultiSheet: %v", err)
+				}
+				if err := f.SetCellValue(sd.Name, coord, cell); err != nil {
+					return fmt.Errorf("WriteXLSXMultiSheet: %v", err)
+				}
+			}
+		}
+	}
+	_, err := f.WriteTo(w)
+	return err
+}
