@@ -5,6 +5,7 @@ import (
 	"io"
 	"math/rand"
 	"sort"
+	"strings"
 
 	"github.com/dreamsxin/gota/series"
 )
@@ -728,4 +729,76 @@ func (df DataFrame) FilterIsIn(colname string, values []interface{}) DataFrame {
 	}
 	
 	return df.Subset(mask)
+}
+
+// ============================================================================
+// Assign & Explode
+// ============================================================================
+
+// Assign adds or replaces a column computed by f(df).
+// If a column with the given name already exists it is replaced; otherwise it
+// is appended. This is analogous to pandas df.assign().
+//
+// Example:
+//
+//	df2 := df.Assign("profit", func(d DataFrame) series.Series {
+//	    rev := d.Col("revenue").Float()
+//	    cost := d.Col("cost").Float()
+//	    out := make([]float64, len(rev))
+//	    for i := range rev { out[i] = rev[i] - cost[i] }
+//	    return series.Floats(out)
+//	})
+func (df DataFrame) Assign(name string, f func(DataFrame) series.Series) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	col := f(df)
+	if col.Err != nil {
+		return DataFrame{Err: fmt.Errorf("Assign %q: %v", name, col.Err)}
+	}
+	col.Name = name
+	return df.Mutate(col)
+}
+
+// Explode expands a column whose elements are comma-separated lists into
+// individual rows, replicating all other columns.
+// Each element in the list becomes its own row; the expanded column is always
+// of type String.
+//
+// Example:
+//
+//	// "tags" column contains "go,python,rust" → 3 rows
+//	df2 := df.Explode("tags")
+func (df DataFrame) Explode(colname string) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	idx := df.ColIndex(colname)
+	if idx < 0 {
+		return DataFrame{Err: fmt.Errorf("Explode: column %q not found", colname)}
+	}
+
+	// Build new columns: same types, empty.
+	newCols := make([]series.Series, df.ncols)
+	for i, col := range df.columns {
+		newCols[i] = col.Empty()
+		newCols[i].Name = col.Name
+	}
+
+	for row := 0; row < df.nrows; row++ {
+		cell := df.columns[idx].Elem(row).String()
+		// Split on comma; trim spaces.
+		parts := strings.Split(cell, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			for ci, col := range df.columns {
+				if ci == idx {
+					newCols[ci].Append(part)
+				} else {
+					newCols[ci].Append(col.Elem(row))
+				}
+			}
+		}
+	}
+	return New(newCols...)
 }

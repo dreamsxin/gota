@@ -384,36 +384,48 @@ func (r RollingWindow) StdDev() Series {
 	n := len(vals)
 	w := r.window
 
-	// Naive O(n*w) per-window computation for numerical correctness.
+	// Welford's online algorithm for a sliding window.
+	// We maintain count, mean, and M2 (sum of squared deviations from mean).
+	// When a value enters the window: update mean and M2.
+	// When a value leaves the window: downdate mean and M2.
+	var count int
+	var mean, m2 float64
+
 	for i := 0; i < n; i++ {
-		start := i - w + 1
-		if start < 0 {
-			start = 0
+		// Add incoming element.
+		if !math.IsNaN(vals[i]) {
+			count++
+			delta := vals[i] - mean
+			mean += delta / float64(count)
+			delta2 := vals[i] - mean
+			m2 += delta * delta2
 		}
-		// Collect non-NaN values in [start, i].
-		var wvals []float64
-		for j := start; j <= i; j++ {
-			if !math.IsNaN(vals[j]) {
-				wvals = append(wvals, vals[j])
+
+		// Remove outgoing element (falls off the left of the window).
+		if i >= w {
+			out := vals[i-w]
+			if !math.IsNaN(out) {
+				count--
+				if count == 0 {
+					mean = 0
+					m2 = 0
+				} else {
+					delta := out - mean
+					mean -= delta / float64(count)
+					delta2 := out - mean
+					m2 -= delta * delta2
+					if m2 < 1e-14 {
+						m2 = 0 // guard against floating-point underflow
+					}
+				}
 			}
 		}
-		if len(wvals) < r.minPeriods || len(wvals) < 2 {
+
+		if count < r.minPeriods || count < 2 {
 			s.Append(math.NaN())
-			continue
+		} else {
+			s.Append(math.Sqrt(m2 / float64(count-1)))
 		}
-		// Compute mean.
-		var sum float64
-		for _, v := range wvals {
-			sum += v
-		}
-		mean := sum / float64(len(wvals))
-		// Compute variance (ddof=1).
-		var sq float64
-		for _, v := range wvals {
-			d := v - mean
-			sq += d * d
-		}
-		s.Append(math.Sqrt(sq / float64(len(wvals)-1)))
 	}
 	return s
 }

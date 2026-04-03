@@ -69,19 +69,19 @@ Status markers: ✅ done · 🔧 partial / needs polish · ❌ not started
 ## In Progress / Needs Polish
 
 ### GroupBy
-- 🔧 `Transform` does not preserve original row order — groups are iterated over a Go map (non-deterministic). Needs an explicit row-index tracking mechanism.
-- 🔧 `GroupBy` key generation uses `fmt.Sprintf` with type-switched format strings; `time.Time` values are not handled and return an error. Should use a type-safe key builder.
+- ✅ `Transform` now preserves original row order via hidden `__groupby_row_idx__` column
+- ✅ `GroupBy` key builder uses `fmt.Sprintf("%v", ...)` — supports all types including `Time`
 
 ### Rolling / EWM
-- 🔧 `Rolling.StdDev` uses O(n·w) naive per-window computation instead of Welford's online algorithm. Acceptable for small windows but degrades on large ones.
+- ✅ `Rolling.StdDev` rewritten with Welford's online sliding-window algorithm (O(n))
 - 🔧 `EWM.Var` Bessel correction approximation (`den - w`) is not exactly equivalent to pandas — needs verification against reference values.
 
 ### Series
-- 🔧 `Subset` / `Copy` / `Append` / `Fill` for `Time` type were missing and have been fixed, but `Time` Series still lacks dedicated tests for these paths.
-- 🔧 `pool.go` exposes `GetXxxElements` / `PutXxxElements` as public API but `BatchConvert` no longer uses them (fixed use-after-free). The pool API should either be made internal or documented as unsafe for direct use.
+- ✅ `Subset` / `Copy` / `Append` / `Fill` for `Time` type fixed and tested
+- ✅ `pool.go` element pool helpers made unexported; only `GetSeries`/`PutSeries` remain public
 
 ### DataFrame
-- 🔧 `Describe` returns `"-"` for `Time` columns — could show min/max timestamps instead.
+- ✅ `Describe` shows min/max RFC3339 timestamps for `Time` columns
 - 🔧 `Info` memory estimate is a rough heuristic (fixed bytes per type); does not account for string heap allocation.
 - 🔧 `Sample` without replacement sorts the result indexes, which changes the relative row order. Should preserve the sampled order.
 
@@ -90,24 +90,24 @@ Status markers: ✅ done · 🔧 partial / needs polish · ❌ not started
 ## Planned
 
 ### v1.2 — Correctness & Stability
-- ❌ Fix `GroupBy.Transform` row-order preservation (attach `__row_idx__` before grouping, re-sort after)
-- ❌ Add `Time` type support to `GroupBy` key builder
-- ❌ Comprehensive `Time` Series tests (`Copy`, `Append`, `Subset`, `FillNaN*`, `Concat`)
-- ❌ Make pool helpers (`GetXxxElements` etc.) unexported or add safety documentation
-- ❌ `Rolling.StdDev` — switch to Welford's online algorithm for O(n) performance
+- ✅ Fix `GroupBy.Transform` row-order preservation (attach `__groupby_row_idx__` before grouping, re-sort after)
+- ✅ Add `Time` type support to `GroupBy` key builder
+- ✅ Comprehensive `Time` Series tests (`Copy`, `Append`, `Subset`, `FillNaN*`, `Concat`, `Order`, element conversions)
+- ✅ Make pool element helpers (`GetXxxElements` etc.) unexported
+- ✅ `Rolling.StdDev` — Welford's online algorithm, O(n)
 - ❌ Verify `EWM.Var` / `EWM.Std` against pandas reference values; add table-driven tests
-- ❌ `Describe` — show `min` / `max` for `Time` columns as RFC3339 strings
+- ✅ `Describe` — show `min` / `max` for `Time` columns as RFC3339 strings
 
 ### v1.3 — Missing pandas-equivalent APIs
-- ❌ `DataFrame.Shift(periods int)` — shift column values by n rows
+- ✅ `DataFrame.Shift(periods int, subset ...string)` — shift column values by n rows
 - ❌ `DataFrame.Resample` — time-based grouping (requires `Time` index)
 - ❌ `DataFrame.Stack` / `Unstack` — reshape between wide and long with MultiIndex
-- ❌ `Series.Clip` — element-wise clip (currently only on DataFrame)
-- ❌ `Series.Replace` — element-wise value replacement
-- ❌ `Series.Between` — element-wise range check returning `[]bool`
-- ❌ `Series.IsIn` — membership test returning `[]bool`
-- ❌ `DataFrame.Explode(col)` — expand list-valued column into rows
-- ❌ `DataFrame.Assign(name, fn)` — add computed column via function
+- ✅ `Series.Clip` — element-wise clip
+- ✅ `Series.Replace` — element-wise value replacement
+- ✅ `Series.Between` — element-wise range check returning Bool Series
+- ✅ `Series.IsIn` — membership test returning Bool Series
+- ✅ `DataFrame.Explode(col)` — expand comma-separated column into rows
+- ✅ `DataFrame.Assign(name, fn)` — add computed column via function
 - ❌ `DataFrame.Query(expr)` — string-based filter expression (low priority)
 
 ### v1.4 — Performance

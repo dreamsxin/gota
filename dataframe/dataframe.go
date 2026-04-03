@@ -474,51 +474,46 @@ func (df DataFrame) GroupBy(colnames ...string) *Groups {
 	if len(colnames) <= 0 {
 		return nil
 	}
-	groupDataFrame := make(map[string]DataFrame)
-	groupSeries := make(map[string][]map[string]interface{})
-	// Check that colname exist on dataframe
+	// Check that all colnames exist.
 	for _, c := range colnames {
 		if idx := findInStringSlice(c, df.Names()); idx == -1 {
 			return &Groups{Err: fmt.Errorf("GroupBy: can't find column name: %s", c)}
 		}
 	}
 
-	for _, s := range df.Maps() {
-		// Gen Key for per Series
-		key := ""
-		for i, c := range colnames {
-			format := ""
-			if i == 0 {
-				format = "%s%"
-			} else {
-				format = "%s_%"
-			}
-			switch s[c].(type) {
-			case string, bool:
-				format += "s"
-			case int, int16, int32, int64:
-				format += "d"
-			case float32, float64:
-				format += "f"
-			default:
-				return &Groups{Err: fmt.Errorf("GroupBy: type not found")}
-			}
-			key = fmt.Sprintf(format, key, s[c])
-		}
-		groupSeries[key] = append(groupSeries[key], s)
+	// Attach a hidden row-index column so Transform can restore original order.
+	const idxCol = "__groupby_row_idx__"
+	rowIdxs := make([]int, df.nrows)
+	for i := range rowIdxs {
+		rowIdxs[i] = i
+	}
+	dfWithIdx := df.Mutate(series.New(rowIdxs, series.Int, idxCol))
+
+	groupDataFrame := make(map[string]DataFrame)
+	groupSeries := make(map[string][]map[string]interface{})
+
+	colTypes := map[string]series.Type{}
+	for _, c := range dfWithIdx.columns {
+		colTypes[c.Name] = c.Type()
 	}
 
-	// Save column types
-	colTypes := map[string]series.Type{}
-	for _, c := range df.columns {
-		colTypes[c.Name] = c.Type()
+	for _, s := range dfWithIdx.Maps() {
+		// Build a type-safe composite key compatible with the original format.
+		key := ""
+		for i, c := range colnames {
+			sep := ""
+			if i > 0 {
+				sep = "_"
+			}
+			key = fmt.Sprintf("%s%s%v", key, sep, s[c])
+		}
+		groupSeries[key] = append(groupSeries[key], s)
 	}
 
 	for k, cMaps := range groupSeries {
 		groupDataFrame[k] = LoadMaps(cMaps, WithTypes(colTypes))
 	}
-	groups := &Groups{groups: groupDataFrame, colnames: colnames}
-	return groups
+	return &Groups{groups: groupDataFrame, colnames: colnames, idxCol: idxCol, nrows: df.nrows}
 }
 
 // AggregationType Aggregation method type
@@ -539,6 +534,8 @@ const (
 type Groups struct {
 	groups      map[string]DataFrame
 	colnames    []string
+	idxCol      string // hidden row-index column name (set by GroupBy)
+	nrows       int    // original DataFrame row count (for Transform)
 	aggregation DataFrame
 	Err         error
 }
@@ -668,22 +665,57 @@ func (gps Groups) Apply(f func(DataFrame) DataFrame) DataFrame {
 }
 
 // Transform applies a user-defined function to each group's column Series and
-// returns a new DataFrame with the same shape as the original. The function
-// receives a Series (one column of one group) and returns a Series of the same
-// length. This is analogous to pandas groupby().transform().
+// returns a new Series aligned to the original DataFrame row order.
+// This is analogous to pandas groupby().transform().
 func (gps Groups) Transform(colname string, f func(series.Series) series.Series) (series.Series, error) {
 	if gps.Err != nil {
 		return series.Series{Err: gps.Err}, gps.Err
 	}
-	// Collect all (original row index, transformed value) pairs so that we can
-	// reconstruct the column in the original row order.
-	// We need to know the original row order. We do this by including a hidden
-	// "__idx__" column during GroupBy – but since that's not available here, we
-	// reconstruct by iterating groups and re-joining on key columns.
-	//
-	// Simpler approach: collect per-group transformed values, then concat in
-	// the same iteration order as the groups map.  The caller is responsible for
-	// re-sorting if order matters.
+
+	// If we have the hidden index column, restore original row order.
+	if gps.idxCol != "" && gps.nrows > 0 {
+		type indexedVal struct {
+			idx int
+			val series.Element
+		}
+		all := make([]indexedVal, 0, gps.nrows)
+
+		for _, df := range gps.groups {
+			col := df.Col(colname)
+			if col.Err != nil {
+				return series.Series{Err: col.Err}, col.Err
+			}
+			transformed := f(col)
+			if transformed.Err != nil {
+				return series.Series{Err: transformed.Err}, transformed.Err
+			}
+			idxSeries := df.Col(gps.idxCol)
+			for i := 0; i < transformed.Len(); i++ {
+				origIdx, err := idxSeries.Elem(i).Int()
+				if err != nil {
+					return series.Series{}, fmt.Errorf("Transform: row index error: %v", err)
+				}
+				all = append(all, indexedVal{idx: origIdx, val: transformed.Elem(i)})
+			}
+		}
+
+		// Sort by original row index.
+		sort.Slice(all, func(i, j int) bool { return all[i].idx < all[j].idx })
+
+		// Determine output type from first non-nil element.
+		outType := series.Float
+		if len(all) > 0 {
+			outType = all[0].val.Type()
+		}
+		out := series.New([]float64{}, outType, colname)
+		for _, iv := range all {
+			out.Append(iv.val)
+		}
+		out.Name = colname
+		return out, nil
+	}
+
+	// Fallback (no index info): concat in map iteration order.
 	var segs []series.Series
 	for _, df := range gps.groups {
 		col := df.Col(colname)
@@ -2167,6 +2199,67 @@ func (df DataFrame) Diff(periods int, subset ...string) DataFrame {
 	return result
 }
 
+// Shift shifts all column values by periods rows. Positive periods shifts
+// down (inserts NaN at the top); negative shifts up (inserts NaN at the bottom).
+// Non-numeric columns are also shifted (NaN becomes the zero/empty value for
+// that type). subset limits which columns are shifted; others pass through.
+//
+// Example:
+//
+//	df.Shift(1)          // shift all columns down by 1
+//	df.Shift(-2, "price") // shift "price" up by 2
+func (df DataFrame) Shift(periods int, subset ...string) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	if periods == 0 {
+		return df.Copy()
+	}
+	applies := func(name string) bool {
+		if len(subset) == 0 {
+			return true
+		}
+		for _, s := range subset {
+			if s == name {
+				return true
+			}
+		}
+		return false
+	}
+	result := df.Copy()
+	n := df.nrows
+	abs := periods
+	if abs < 0 {
+		abs = -abs
+	}
+	for ci, col := range result.columns {
+		if !applies(col.Name) {
+			continue
+		}
+		shifted := col.Empty()
+		if periods > 0 {
+			// Shift down: prepend `periods` NaNs, drop last `periods` elements.
+			for i := 0; i < periods && i < n; i++ {
+				shifted.Append(nil)
+			}
+			for i := 0; i < n-periods; i++ {
+				shifted.Append(col.Elem(i))
+			}
+		} else {
+			// Shift up: drop first `abs` elements, append `abs` NaNs.
+			for i := abs; i < n; i++ {
+				shifted.Append(col.Elem(i))
+			}
+			for i := 0; i < abs && i < n; i++ {
+				shifted.Append(nil)
+			}
+		}
+		shifted.Name = col.Name
+		result.columns[ci] = shifted
+	}
+	return result
+}
+
 // PctChange returns a new DataFrame where each numeric column is replaced by
 // its percentage change relative to the element periods positions prior.
 func (df DataFrame) PctChange(periods int, subset ...string) DataFrame {
@@ -2774,7 +2867,22 @@ func (df DataFrame) Describe() DataFrame {
 				col.Name,
 			)
 		case series.Time:
-			newCol = series.New([]string{"-", "-", "-", "-", "-", "-", "-", "-"},
+			// Show min and max timestamps; other stats are not applicable.
+			minStr, maxStr := "-", "-"
+			for i := 0; i < col.Len(); i++ {
+				e := col.Elem(i)
+				if e.IsNA() {
+					continue
+				}
+				if minStr == "-" || e.String() < minStr {
+					minStr = e.String()
+				}
+				if maxStr == "-" || e.String() > maxStr {
+					maxStr = e.String()
+				}
+			}
+			newCol = series.New(
+				[]string{"-", "-", "-", minStr, "-", "-", "-", maxStr},
 				series.String,
 				col.Name,
 			)
