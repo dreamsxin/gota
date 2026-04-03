@@ -108,15 +108,18 @@ func (df DataFrame) Info(w io.Writer) {
 	for _, col := range df.columns {
 		switch col.Type() {
 		case series.Int:
-			totalBytes += df.nrows * 8 // int64
+			totalBytes += df.nrows * 8
 		case series.Float:
-			totalBytes += df.nrows * 8 // float64
+			totalBytes += df.nrows * 8
 		case series.Bool:
-			totalBytes += df.nrows * 1 // bool
+			totalBytes += df.nrows * 1
 		case series.String:
-			totalBytes += df.nrows * 16 // string header + avg data
+			// Use actual string lengths for a more accurate estimate.
+			for j := 0; j < df.nrows; j++ {
+				totalBytes += 16 + len(col.Elem(j).String()) // string header + data
+			}
 		case series.Time:
-			totalBytes += df.nrows * 8 // time.Time
+			totalBytes += df.nrows * 24 // time.Time is 24 bytes
 		}
 	}
 	
@@ -351,11 +354,9 @@ func (df DataFrame) Sample(n int, frac float64, replace bool, seed int64) DataFr
 		if sampleSize > df.nrows {
 			return DataFrame{Err: fmt.Errorf("sample: n larger than population")}
 		}
-		
-		// Fisher-Yates shuffle
+		// Fisher-Yates shuffle — preserve sampled order (no sort).
 		perm := rng.Perm(df.nrows)
 		indexes = perm[:sampleSize]
-		sort.Ints(indexes) // Sort for consistent output
 	}
 	
 	return df.Subset(indexes)

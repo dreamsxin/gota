@@ -12,15 +12,27 @@ import (
 func openFile(path string) (*os.File, error)   { return os.Open(path) }
 func createFile(path string) (*os.File, error) { return os.Create(path) }
 
+// WithSheet returns a LoadOption that selects a specific sheet by name when
+// reading XLSX files. If not specified, the first sheet is used.
+//
+// Example:
+//
+//	df := dataframe.ReadXLSXFile("data.xlsx", dataframe.WithSheet("Sheet2"))
+func WithSheet(name string) LoadOption {
+	return func(cfg *loadOptions) {
+		cfg.sheet = name
+	}
+}
+
 // ReadXLSX reads the first (or named) sheet of an XLSX file from r and
 // returns a DataFrame.  The first row is used as column headers by default.
 //
 // Options:
-//   - HasHeader(bool)    – whether the first row contains column names (default true)
-//   - Names(...)         – override column names
-//   - WithTypes(map)     – specify column types explicitly
+//   - HasHeader(bool)     – whether the first row contains column names (default true)
+//   - Names(...)          – override column names
+//   - WithTypes(map)      – specify column types explicitly
 //   - NaNValues([]string) – additional strings to treat as NaN
-//   - WithSheet(name)    – sheet name to read (default: first sheet)
+//   - WithSheet(name)     – sheet name to read (default: first sheet)
 func ReadXLSX(r io.Reader, options ...LoadOption) DataFrame {
 	cfg := loadOptions{
 		defaultType: series.String,
@@ -28,16 +40,9 @@ func ReadXLSX(r io.Reader, options ...LoadOption) DataFrame {
 		hasHeader:   true,
 		nanValues:   []string{"NA", "NaN", "<nil>", ""},
 	}
-	sheetName := "" // empty means first sheet
-
-	// Pull out custom sheet option before merging.
-	var passOptions []LoadOption
 	for _, opt := range options {
-		// WithSheet is handled separately; all others are forwarded.
-		passOptions = append(passOptions, opt)
 		opt(&cfg)
 	}
-	_ = passOptions
 
 	f, err := excelize.OpenReader(r)
 	if err != nil {
@@ -45,6 +50,7 @@ func ReadXLSX(r io.Reader, options ...LoadOption) DataFrame {
 	}
 	defer f.Close()
 
+	sheetName := cfg.sheet
 	if sheetName == "" {
 		sheets := f.GetSheetList()
 		if len(sheets) == 0 {
@@ -61,7 +67,7 @@ func ReadXLSX(r io.Reader, options ...LoadOption) DataFrame {
 		return DataFrame{Err: fmt.Errorf("ReadXLSX: sheet %q is empty", sheetName)}
 	}
 
-	// Normalise all rows to the same width (some cells at end of row may be absent).
+	// Normalise all rows to the same width.
 	maxCols := 0
 	for _, row := range rows {
 		if len(row) > maxCols {

@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/dreamsxin/gota/series"
@@ -631,6 +633,109 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 	return gps.aggregation
 }
 
+// AggregationParallel is like Aggregation but processes groups concurrently.
+// It is safe to use when the aggregation functions are pure (no shared state).
+func (gps Groups) AggregationParallel(typs []AggregationType, colnames []string) DataFrame {
+	if gps.groups == nil {
+		return DataFrame{Err: fmt.Errorf("AggregationParallel: input is nil")}
+	}
+	if len(typs) != len(colnames) {
+		return DataFrame{Err: fmt.Errorf("AggregationParallel: len(typs) != len(colnames)")}
+	}
+	if len(gps.groups) == 0 {
+		return DataFrame{Err: fmt.Errorf("AggregationParallel: no groups")}
+	}
+
+	type result struct {
+		m   map[string]interface{}
+		err error
+	}
+
+	ch := make(chan result, len(gps.groups))
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	var wg sync.WaitGroup
+
+	for _, df := range gps.groups {
+		wg.Add(1)
+		go func(df DataFrame) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			rows := df.Maps()
+			if len(rows) == 0 {
+				ch <- result{}
+				return
+			}
+			targetMap := rows[0]
+			curMap := make(map[string]interface{})
+			for _, c := range gps.colnames {
+				if value, ok := targetMap[c]; ok {
+					curMap[c] = value
+				} else {
+					ch <- result{err: fmt.Errorf("AggregationParallel: can't find column %s", c)}
+					return
+				}
+			}
+			for i, c := range colnames {
+				curSeries := df.Col(c)
+				if curSeries.Err != nil {
+					curMap[buildAggregatedColname(c, typs[i])] = nil
+					continue
+				}
+				var value float64
+				switch typs[i] {
+				case Aggregation_MAX:
+					value = curSeries.Max()
+				case Aggregation_MEAN:
+					value = curSeries.Mean()
+				case Aggregation_MEDIAN:
+					value = curSeries.Median()
+				case Aggregation_MIN:
+					value = curSeries.Min()
+				case Aggregation_STD:
+					value = curSeries.StdDev()
+				case Aggregation_SUM:
+					value = curSeries.Sum()
+				case Aggregation_COUNT:
+					value = float64(curSeries.Len())
+				default:
+					ch <- result{err: fmt.Errorf("AggregationParallel: method %s not found", typs[i])}
+					return
+				}
+				curMap[buildAggregatedColname(c, typs[i])] = value
+			}
+			ch <- result{m: curMap}
+		}(df)
+	}
+	go func() { wg.Wait(); close(ch) }()
+
+	var dfMaps []map[string]interface{}
+	for r := range ch {
+		if r.err != nil {
+			return DataFrame{Err: r.err}
+		}
+		if r.m != nil {
+			dfMaps = append(dfMaps, r.m)
+		}
+	}
+	if len(dfMaps) == 0 {
+		return DataFrame{Err: fmt.Errorf("AggregationParallel: no data")}
+	}
+	colTypes := map[string]series.Type{}
+	for k, v := range dfMaps[0] {
+		switch v.(type) {
+		case string:
+			colTypes[k] = series.String
+		case int, int16, int32, int64:
+			colTypes[k] = series.Int
+		case float32, float64:
+			colTypes[k] = series.Float
+		}
+	}
+	return LoadMaps(dfMaps, WithTypes(colTypes))
+}
+
 // GetGroups returns the grouped data frames created by GroupBy
 func (g Groups) GetGroups() map[string]DataFrame {
 	return g.groups
@@ -1046,6 +1151,39 @@ func (df DataFrame) Capply(f func(series.Series) series.Series) DataFrame {
 	return New(columns...)
 }
 
+// CapplyParallel applies f to each column concurrently using up to GOMAXPROCS
+// goroutines. Column order is preserved. The function f must be safe to call
+// from multiple goroutines simultaneously.
+func (df DataFrame) CapplyParallel(f func(series.Series) series.Series) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	columns := make([]series.Series, df.ncols)
+	type result struct {
+		idx int
+		s   series.Series
+	}
+	ch := make(chan result, df.ncols)
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	var wg sync.WaitGroup
+	for i, s := range df.columns {
+		wg.Add(1)
+		go func(idx int, col series.Series) {
+			defer wg.Done()
+			sem <- struct{}{}
+			applied := f(col)
+			applied.Name = col.Name
+			ch <- result{idx, applied}
+			<-sem
+		}(i, s)
+	}
+	go func() { wg.Wait(); close(ch) }()
+	for r := range ch {
+		columns[r.idx] = r.s
+	}
+	return New(columns...)
+}
+
 // Rapply applies the given function to the rows of a DataFrame. Prior to applying
 // the function the elements of each row are cast to a Series of a specific
 // type. In order of priority: String -> Float -> Int -> Bool. This casting also
@@ -1185,6 +1323,9 @@ type loadOptions struct {
 
 	// Defines which col idx are going to be skipped when load from slice.
 	skipColIdxs map[int]int
+
+	// sheet specifies the XLSX sheet name to read (used by ReadXLSX).
+	sheet string
 }
 
 // DefaultType sets the defaultType option for loadOptions.

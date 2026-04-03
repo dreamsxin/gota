@@ -118,8 +118,12 @@ func (e EWM) Mean() Series {
 }
 
 // Var returns the exponentially weighted variance (ddof=1).
+// Uses the pandas-compatible formula:
+//
+//	V[i] = Σ w_j*(x_j - μ_i)² / (Σ w_j - Σ w_j²/Σ w_j)
+//
+// where weights w_j = (1-α)^(i-j) (adjusted mode).
 func (e EWM) Var() Series {
-	mean := e.Mean()
 	s := New([]float64{}, Float, "EWM_var")
 	vals := make([]float64, e.series.Len())
 	for i := 0; i < e.series.Len(); i++ {
@@ -132,29 +136,41 @@ func (e EWM) Var() Series {
 	}
 	alpha := e.alpha
 	n := len(vals)
+
 	for i := 0; i < n; i++ {
-		m := mean.Elem(i).Float()
-		if math.IsNaN(m) {
+		// Accumulate weighted mean, sum-of-weights, sum-of-squared-weights,
+		// and weighted sum-of-squared-deviations in a single forward pass.
+		var sumW, sumW2, mean, m2 float64
+		validCount := 0
+
+		// w[j] = (1-α)^(i-j); newest element (j=i) has weight 1.
+		w := math.Pow(1-alpha, float64(i))
+		for j := 0; j <= i; j++ {
+			if !math.IsNaN(vals[j]) {
+				validCount++
+				sumW += w
+				sumW2 += w * w
+				// Welford-style online update for weighted mean and M2.
+				oldMean := mean
+				mean += (w / sumW) * (vals[j] - oldMean)
+				m2 += w * (vals[j] - oldMean) * (vals[j] - mean)
+			}
+			if j < i && (1-alpha) > 0 {
+				w /= (1 - alpha)
+			}
+		}
+
+		if validCount < e.minPeriods || validCount < 2 {
 			s.Append(math.NaN())
 			continue
 		}
-		var num, den float64
-		w := 1.0
-		for j := i; j >= 0; j-- {
-			if !math.IsNaN(vals[j]) {
-				d := vals[j] - m
-				num += w * d * d
-				den += w
-			}
-			if j > 0 {
-				w *= (1 - alpha)
-			}
-		}
-		if den <= 1 {
+		// Bessel correction for weighted variance (pandas formula):
+		// var = M2 / (sumW - sumW2/sumW)
+		denom := sumW - sumW2/sumW
+		if denom <= 0 {
 			s.Append(math.NaN())
 		} else {
-			// Bessel-corrected: multiply by sum(w)/(sum(w) - 1) approx
-			s.Append(num / (den - w))
+			s.Append(m2 / denom)
 		}
 	}
 	return s
