@@ -47,6 +47,20 @@ methods for Go, inspired by pandas. The API is still evolving so
   - [Diff & PctChange](#diff--pctchange-series)
   - [Correlation & Covariance](#correlation--covariance-series)
   - [Type Conversion](#type-conversion)
+  - [Categorical](#categorical)
+- [New DataFrame APIs (v1.3+)](#new-dataframe-apis-v13)
+  - [Shift](#shift)
+  - [Assign](#assign)
+  - [Explode](#explode)
+  - [Query](#query)
+  - [Stack / Unstack](#stack--unstack)
+  - [Resample](#resample)
+  - [Parallel operations](#parallel-operations)
+- [New I/O APIs (v1.5+)](#new-io-apis-v15)
+  - [JSON Lines (NDJSON)](#json-lines-ndjson)
+  - [Excel — sheet selection](#excel--sheet-selection)
+  - [SQL — named placeholders](#sql--named-placeholders)
+  - [CSV streaming](#csv-streaming)
 - [License](#license)
 
 ---
@@ -769,6 +783,155 @@ Conversion rules:
 - Invalid string → NaN (e.g. `"abc"` to Int)
 - `int/int64` → `time.Time` via `time.Unix(v, 0)`
 - `string` → `time.Time` requires RFC3339 format; others become NaN
+
+### Categorical
+
+`Categorical` is a memory-efficient column type for low-cardinality string data
+(country codes, status labels, enum-like columns). It uses dictionary encoding:
+a sorted slice of unique strings plus a `[]int32` code array.
+
+```go
+// Create from string slice
+cat := series.NewCategorical([]string{"US", "UK", "US", "DE"}, "country")
+
+// Convert from/to regular String Series
+cat, err := series.CategoricalFromSeries(s)
+s := cat.ToSeries()
+
+// Inspect
+cat.Len()          // number of rows
+cat.NCategories()  // number of distinct values
+cat.Categories()   // sorted dictionary slice
+cat.Get(i)         // string value at row i
+cat.IsNA(i)        // true if row i is missing
+
+// Frequency counts
+counts := cat.ValueCounts() // map[string]int
+
+// Modify
+cat.AddCategory("FR")          // extend dictionary
+cat.SetValue(0, "FR")          // set row value (must be in dictionary)
+
+// Filter
+filtered, err := cat.Filter([]bool{true, false, true, false})
+
+// Memory estimate
+bytes := cat.MemoryBytes()
+```
+
+---
+
+### New DataFrame APIs (v1.3+)
+
+#### Shift
+
+```go
+df.Shift(1)           // shift all columns down by 1 row (NaN at top)
+df.Shift(-2, "price") // shift "price" up by 2 rows (NaN at bottom)
+```
+
+#### Assign
+
+```go
+df2 := df.Assign("profit", func(d dataframe.DataFrame) series.Series {
+    rev := d.Col("revenue").Float()
+    cost := d.Col("cost").Float()
+    out := make([]float64, len(rev))
+    for i := range rev { out[i] = rev[i] - cost[i] }
+    return series.Floats(out)
+})
+```
+
+#### Explode
+
+```go
+// "tags" column: "go,python" → two rows
+df2 := df.Explode("tags")
+```
+
+#### Query
+
+```go
+df.Query("age > 18")
+df.Query("status == active")
+df.Query("age >= 18 AND age <= 65")
+df.Query("country in US,UK,CA")
+df.Query("score > 0.5 OR label == good")
+```
+
+Operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, `in`, `not in`.
+Combine with `AND` / `OR` (case-insensitive). Column names containing
+operator substrings (e.g. `income`, `bandwidth`) are handled correctly.
+
+#### Stack / Unstack
+
+```go
+// wide → long (alias for Melt)
+long := df.Stack([]string{"id"}, []string{"q1","q2","q3"}, "quarter", "value")
+
+// long → wide
+wide := df.Unstack([]string{"id"}, "quarter", "value")
+```
+
+#### Resample
+
+```go
+rg := df.Resample("date", dataframe.ResampleMonthly) // D/W/M/Y/H
+monthly := rg.Aggregation(
+    []dataframe.AggregationType{dataframe.Aggregation_SUM},
+    []string{"revenue"},
+)
+// result has "period" column + aggregated columns
+```
+
+#### Parallel operations
+
+```go
+df.CapplyParallel(f)                                    // parallel column-wise apply
+df.RapplyParallel(f)                                    // parallel row-wise apply
+groups.AggregationParallel(typs, colnames)              // parallel GroupBy aggregation
+```
+
+---
+
+### New I/O APIs (v1.5+)
+
+#### JSON Lines (NDJSON)
+
+```go
+// Read
+df := dataframe.ReadNDJSON(r)
+
+// Write (NaN → null)
+err := df.WriteNDJSON(w)
+```
+
+#### Excel — sheet selection
+
+```go
+df := dataframe.ReadXLSXFile("data.xlsx", dataframe.WithSheet("Sheet2"))
+```
+
+#### SQL — named placeholders
+
+```go
+// PostgreSQL ($1, $2, …)
+err := df.WriteSQL(pgDB, "users",
+    dataframe.WithPlaceholderStyle(dataframe.SQLPlaceholderDollar))
+
+// SQL Server (@p1, @p2, …)
+err := df.WriteSQL(msDB, "users",
+    dataframe.WithPlaceholderStyle(dataframe.SQLPlaceholderAt))
+```
+
+#### CSV streaming
+
+```go
+err := dataframe.ScanCSV(f, 1000, func(batch dataframe.DataFrame) error {
+    // process 1000-row batch
+    return nil
+})
+```
 
 ---
 
