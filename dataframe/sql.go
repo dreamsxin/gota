@@ -94,13 +94,26 @@ func sqlTypeToSeriesType(dbTypeName string) series.Type {
 	}
 }
 
+// SQLPlaceholderStyle controls the placeholder syntax used in INSERT statements.
+type SQLPlaceholderStyle string
+
+const (
+	// SQLPlaceholderQuestion uses ? (SQLite, MySQL). This is the default.
+	SQLPlaceholderQuestion SQLPlaceholderStyle = "?"
+	// SQLPlaceholderDollar uses $1, $2, … (PostgreSQL).
+	SQLPlaceholderDollar SQLPlaceholderStyle = "$"
+	// SQLPlaceholderAt uses @p1, @p2, … (SQL Server / MSSQL).
+	SQLPlaceholderAt SQLPlaceholderStyle = "@p"
+)
+
 // SQLInsertOption configures DataFrame.WriteSQL behaviour.
 type SQLInsertOption func(*sqlInsertOptions)
 
 type sqlInsertOptions struct {
-	batchSize     int  // rows per INSERT statement (default 500)
-	createTable   bool // create the table if it doesn't exist
-	truncateFirst bool // TRUNCATE / DELETE FROM before inserting
+	batchSize        int                // rows per INSERT statement (default 500)
+	createTable      bool               // create the table if it doesn't exist
+	truncateFirst    bool               // TRUNCATE / DELETE FROM before inserting
+	placeholderStyle SQLPlaceholderStyle // placeholder syntax (default ?)
 }
 
 // WithBatchSize sets how many rows are inserted per statement.
@@ -118,17 +131,44 @@ func WithTruncateFirst(b bool) SQLInsertOption {
 	return func(o *sqlInsertOptions) { o.truncateFirst = b }
 }
 
+// WithPlaceholderStyle sets the SQL placeholder style for INSERT statements.
+// Use SQLPlaceholderDollar for PostgreSQL, SQLPlaceholderAt for SQL Server.
+//
+// Example:
+//
+//	err := df.WriteSQL(pgDB, "users", dataframe.WithPlaceholderStyle(dataframe.SQLPlaceholderDollar))
+func WithPlaceholderStyle(style SQLPlaceholderStyle) SQLInsertOption {
+	return func(o *sqlInsertOptions) { o.placeholderStyle = style }
+}
+
+// buildPlaceholder returns the placeholder string for position pos (1-based).
+func buildPlaceholder(style SQLPlaceholderStyle, pos int) string {
+	switch style {
+	case SQLPlaceholderDollar:
+		return fmt.Sprintf("$%d", pos)
+	case SQLPlaceholderAt:
+		return fmt.Sprintf("@p%d", pos)
+	default:
+		return "?"
+	}
+}
+
 // WriteSQL inserts the DataFrame into a SQL table using db.
 // tableName is the destination table.  Column names are taken from the DataFrame.
 //
 // Example:
 //
+//	// SQLite / MySQL (default ? placeholders)
 //	err := df.WriteSQL(db, "my_table", dataframe.WithCreateTable(true))
+//
+//	// PostgreSQL ($1, $2, … placeholders)
+//	err := df.WriteSQL(pgDB, "my_table",
+//	    dataframe.WithPlaceholderStyle(dataframe.SQLPlaceholderDollar))
 func (df DataFrame) WriteSQL(db *sql.DB, tableName string, opts ...SQLInsertOption) error {
 	if df.Err != nil {
 		return df.Err
 	}
-	cfg := sqlInsertOptions{batchSize: 500}
+	cfg := sqlInsertOptions{batchSize: 500, placeholderStyle: SQLPlaceholderQuestion}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -158,7 +198,15 @@ func (df DataFrame) WriteSQL(db *sql.DB, tableName string, opts ...SQLInsertOpti
 		quotedCols[i] = fmt.Sprintf(`"%s"`, n)
 	}
 	colList := strings.Join(quotedCols, ", ")
-	placeholders := "(" + strings.Join(repeatStr("?", ncols), ", ") + ")"
+
+	// Build per-row placeholder group, e.g. (?,?,?) or ($1,$2,$3).
+	buildRowPlaceholders := func(rowOffset int) string {
+		ph := make([]string, ncols)
+		for i := 0; i < ncols; i++ {
+			ph[i] = buildPlaceholder(cfg.placeholderStyle, rowOffset*ncols+i+1)
+		}
+		return "(" + strings.Join(ph, ", ") + ")"
+	}
 
 	// Insert in batches.
 	records := df.Records() // first row is header
@@ -174,7 +222,7 @@ func (df DataFrame) WriteSQL(db *sql.DB, tableName string, opts ...SQLInsertOpti
 
 		allPlaceholders := make([]string, batchLen)
 		for i := range batch {
-			allPlaceholders[i] = placeholders
+			allPlaceholders[i] = buildRowPlaceholders(i)
 		}
 		stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s",
 			tableName, colList, strings.Join(allPlaceholders, ", "))

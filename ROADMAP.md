@@ -97,12 +97,12 @@ Status markers: ✅ done · 🔧 partial / needs polish · ❌ not started
 - ✅ `Series.Clip`, `Series.Replace`, `Series.Between`, `Series.IsIn`
 - ✅ `DataFrame.Explode(col)` — expand comma-separated column into rows
 - ✅ `DataFrame.Assign(name, fn)` — add computed column via function
-- ❌ `DataFrame.Query(expr)` — string-based filter expression (low priority)
+- ✅ `DataFrame.Query(expr)` — expression-based row filter (col op val, AND/OR, in/not in)
 
 ### v1.4 — Performance
 - ✅ Parallel `Capply` via `CapplyParallel` using `GOMAXPROCS` worker pool
+- ✅ Parallel `Rapply` via `RapplyParallel` — row order preserved
 - ✅ Parallel `GroupBy` aggregation via `AggregationParallel`
-- ❌ Parallel `Rapply`
 - ❌ Arrow / columnar memory layout option for numeric columns
 - ❌ Lazy evaluation / query plan for chained operations
 - ❌ SIMD-friendly float operations via `gonum/blas`
@@ -110,8 +110,8 @@ Status markers: ✅ done · 🔧 partial / needs polish · ❌ not started
 ### v1.5 — I/O & Interop
 - ❌ Parquet read/write
 - ✅ `ReadXLSX` sheet selection via `WithSheet(name)` option — fully wired
-- ❌ `WriteSQL` named placeholders for PostgreSQL / SQL Server
-- ❌ `ReadCSV` streaming mode for files larger than memory
+- ✅ `WriteSQL` named placeholders — `SQLPlaceholderDollar` ($1) for PostgreSQL, `SQLPlaceholderAt` (@p1) for SQL Server
+- ✅ `ReadCSV` streaming mode — `ScanCSV(r, batchSize, fn)` for large files
 - ✅ JSON Lines (`ndjson`) — `ReadNDJSON` / `WriteNDJSON`
 
 ### v1.6 — Type System

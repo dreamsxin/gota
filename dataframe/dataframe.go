@@ -1282,8 +1282,122 @@ func (df DataFrame) Rapply(f func(series.Series) series.Series) DataFrame {
 	return df
 }
 
-// Read/Write Methods
-// =================
+// RapplyParallel applies f to each row concurrently using up to GOMAXPROCS
+// goroutines. Row order is preserved. f must be safe to call concurrently.
+func (df DataFrame) RapplyParallel(f func(series.Series) series.Series) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+
+	detectType := func(types []series.Type) series.Type {
+		var hasStrings, hasFloats, hasInts, hasBools bool
+		for _, t := range types {
+			switch t {
+			case series.String:
+				hasStrings = true
+			case series.Float:
+				hasFloats = true
+			case series.Int:
+				hasInts = true
+			case series.Bool:
+				hasBools = true
+			}
+		}
+		switch {
+		case hasStrings:
+			return series.String
+		case hasBools:
+			return series.Bool
+		case hasFloats:
+			return series.Float
+		case hasInts:
+			return series.Int
+		default:
+			return series.String
+		}
+	}
+
+	types := df.Types()
+	rowType := detectType(types)
+
+	type rowResult struct {
+		idx   int
+		elems []series.Element
+		err   error
+	}
+
+	ch := make(chan rowResult, df.nrows)
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	var wg sync.WaitGroup
+
+	for i := 0; i < df.nrows; i++ {
+		wg.Add(1)
+		go func(rowIdx int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			row := series.New(nil, rowType, "").Empty()
+			for _, col := range df.columns {
+				row.Append(col.Elem(rowIdx))
+			}
+			row = f(row)
+			if row.Err != nil {
+				ch <- rowResult{idx: rowIdx, err: row.Err}
+				return
+			}
+			elems := make([]series.Element, row.Len())
+			for j := 0; j < row.Len(); j++ {
+				elems[j] = row.Elem(j)
+			}
+			ch <- rowResult{idx: rowIdx, elems: elems}
+		}(i)
+	}
+	go func() { wg.Wait(); close(ch) }()
+
+	elements := make([][]series.Element, df.nrows)
+	rowlen := -1
+	for r := range ch {
+		if r.err != nil {
+			return DataFrame{Err: fmt.Errorf("RapplyParallel row %d: %v", r.idx, r.err)}
+		}
+		if rowlen == -1 {
+			rowlen = len(r.elems)
+		} else if rowlen != len(r.elems) {
+			return DataFrame{Err: fmt.Errorf("RapplyParallel: rows have different lengths")}
+		}
+		elements[r.idx] = r.elems
+	}
+	if rowlen <= 0 {
+		return df.Copy()
+	}
+
+	columns := make([]series.Series, rowlen)
+	for j := 0; j < rowlen; j++ {
+		colTypes := make([]series.Type, df.nrows)
+		for i := 0; i < df.nrows; i++ {
+			colTypes[i] = elements[i][j].Type()
+		}
+		colType := detectType(colTypes)
+		s := series.New(nil, colType, "").Empty()
+		for i := 0; i < df.nrows; i++ {
+			s.Append(elements[i][j])
+		}
+		columns[j] = s
+	}
+
+	nrows, ncols, err := checkColumnsDimensions(columns...)
+	if err != nil {
+		return DataFrame{Err: err}
+	}
+	result := DataFrame{columns: columns, ncols: ncols, nrows: nrows}
+	colnames := result.Names()
+	fixColnames(colnames)
+	for i, colname := range colnames {
+		result.columns[i].Name = colname
+	}
+	return result
+}
 
 // LoadOption is the type used to configure the load of elements
 type LoadOption func(*loadOptions)
