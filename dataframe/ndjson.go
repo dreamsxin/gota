@@ -20,6 +20,9 @@ import (
 //	df := dataframe.ReadNDJSON(f)
 func ReadNDJSON(r io.Reader, options ...LoadOption) DataFrame {
 	scanner := bufio.NewScanner(r)
+	// Increase buffer to 10 MB to handle large JSON objects per line.
+	const maxScanBuf = 10 * 1024 * 1024
+	scanner.Buffer(make([]byte, 64*1024), maxScanBuf)
 	var records []map[string]interface{}
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

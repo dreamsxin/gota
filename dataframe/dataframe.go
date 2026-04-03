@@ -736,20 +736,37 @@ func (gps Groups) AggregationParallel(typs []AggregationType, colnames []string)
 	return LoadMaps(dfMaps, WithTypes(colTypes))
 }
 
-// GetGroups returns the grouped data frames created by GroupBy
+// GetGroups returns the grouped DataFrames created by GroupBy.
+// The hidden row-index column is stripped from each group before returning.
 func (g Groups) GetGroups() map[string]DataFrame {
-	return g.groups
+	if g.idxCol == "" {
+		return g.groups
+	}
+	// Strip the hidden index column from each group.
+	clean := make(map[string]DataFrame, len(g.groups))
+	for k, df := range g.groups {
+		if df.ColIndex(g.idxCol) >= 0 {
+			clean[k] = df.Drop(g.idxCol)
+		} else {
+			clean[k] = df
+		}
+	}
+	return clean
 }
 
 // Apply applies a user-defined function to each group's DataFrame and returns
 // the concatenated result. This is analogous to pandas groupby().apply().
-// The function receives the group DataFrame and should return a DataFrame.
+// The hidden row-index column is stripped before passing each group to f.
 func (gps Groups) Apply(f func(DataFrame) DataFrame) DataFrame {
 	if gps.Err != nil {
 		return DataFrame{Err: gps.Err}
 	}
 	var results []DataFrame
 	for _, df := range gps.groups {
+		// Strip hidden index column before passing to user function.
+		if gps.idxCol != "" && df.ColIndex(gps.idxCol) >= 0 {
+			df = df.Drop(gps.idxCol)
+		}
 		res := f(df)
 		if res.Err != nil {
 			return DataFrame{Err: res.Err}

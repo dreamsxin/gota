@@ -79,7 +79,11 @@ func ScanCSV(r io.Reader, batchSize int, fn func(DataFrame) error, options ...Lo
 		if len(batch) == 0 || (cfg.hasHeader && len(batch) == 1) {
 			return nil
 		}
-		df := LoadRecords(batch, options...)
+		// Copy batch to avoid data races: LoadRecords stores string slices
+		// by reference, and we reuse the batch slice for the next window.
+		snapshot := make([][]string, len(batch))
+		copy(snapshot, batch)
+		df := LoadRecords(snapshot, options...)
 		if df.Err != nil {
 			return df.Err
 		}
@@ -141,7 +145,7 @@ func (df DataFrame) Query(expr string) DataFrame {
 		return df.Copy()
 	}
 
-	// Split on AND / OR (case-insensitive), preserving the operator.
+	// Split on AND / OR (case-insensitive) as whole words.
 	type clause struct {
 		op   string // "AND" or "OR" (empty for first)
 		cond string
@@ -149,9 +153,8 @@ func (df DataFrame) Query(expr string) DataFrame {
 	var clauses []clause
 	rest := strings.TrimSpace(expr)
 	for rest != "" {
-		// Find next AND/OR boundary.
-		andIdx := indexWordCI(rest, "AND")
-		orIdx := indexWordCI(rest, "OR")
+		andIdx := wordBoundaryIndex(rest, "AND")
+		orIdx := wordBoundaryIndex(rest, "OR")
 
 		var splitAt int
 		var splitOp string
@@ -174,7 +177,6 @@ func (df DataFrame) Query(expr string) DataFrame {
 		}
 		clauses = append(clauses, clause{cond: strings.TrimSpace(rest[:splitAt])})
 		rest = strings.TrimSpace(rest[splitAt+len(splitOp):])
-		// Tag the *next* clause with the operator that precedes it.
 		if len(clauses) > 0 {
 			clauses[len(clauses)-1].op = splitOp
 		}
@@ -210,21 +212,42 @@ func (df DataFrame) Query(expr string) DataFrame {
 func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 	cond = strings.TrimSpace(cond)
 
-	// Try two-word operators first (not in).
-	ops2 := []string{"not in", ">=", "<=", "!=", "==", ">", "<", "in"}
+	// Operators ordered longest-first to avoid prefix ambiguity.
+	// "not in" must come before "in"; ">=" before ">"; "<=" before "<".
+	ops := []string{"not in", ">=", "<=", "!=", "==", ">", "<", "in"}
 	var op, colPart, valPart string
-	for _, candidate := range ops2 {
-		idx := strings.Index(strings.ToLower(cond), candidate)
-		if idx < 0 {
-			continue
+	for _, candidate := range ops {
+		// Search case-insensitively, but require the operator to be surrounded
+		// by spaces (or at string boundaries) so that column names like
+		// "income" don't accidentally match "in".
+		lower := strings.ToLower(cond)
+		lc := strings.ToLower(candidate)
+		idx := 0
+		for {
+			pos := strings.Index(lower[idx:], lc)
+			if pos < 0 {
+				break
+			}
+			abs := idx + pos
+			before := abs == 0 || lower[abs-1] == ' '
+			after := abs+len(lc) >= len(lower) || lower[abs+len(lc)] == ' '
+			if before && after {
+				colPart = strings.TrimSpace(cond[:abs])
+				valPart = strings.TrimSpace(cond[abs+len(candidate):])
+				op = candidate
+				break
+			}
+			idx = abs + 1
 		}
-		colPart = strings.TrimSpace(cond[:idx])
-		valPart = strings.TrimSpace(cond[idx+len(candidate):])
-		op = candidate
-		break
+		if op != "" {
+			break
+		}
 	}
 	if op == "" {
 		return nil, fmt.Errorf("unrecognised expression: %q", cond)
+	}
+	if colPart == "" {
+		return nil, fmt.Errorf("missing column name in expression: %q", cond)
 	}
 
 	col := df.Col(colPart)
@@ -242,13 +265,10 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 		for _, v := range vals {
 			lookup[strings.TrimSpace(v)] = struct{}{}
 		}
+		isIn := strings.ToLower(op) == "in"
 		for i := 0; i < n; i++ {
 			_, found := lookup[col.Elem(i).String()]
-			if strings.ToLower(op) == "in" {
-				result[i] = found
-			} else {
-				result[i] = !found
-			}
+			result[i] = found == isIn
 		}
 	default:
 		// Numeric comparison if possible, else string.
@@ -297,9 +317,12 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 	return result, nil
 }
 
-// indexWordCI finds the byte index of word (case-insensitive) as a whole word
-// (surrounded by spaces or at string boundaries) in s. Returns -1 if not found.
-func indexWordCI(s, word string) int {
+
+
+// wordBoundaryIndex returns the byte index of word (case-insensitive) in s,
+// requiring it to be surrounded by spaces or string boundaries.
+// Returns -1 if not found.
+func wordBoundaryIndex(s, word string) int {
 	lower := strings.ToLower(s)
 	lword := strings.ToLower(word)
 	start := 0
@@ -309,7 +332,6 @@ func indexWordCI(s, word string) int {
 			return -1
 		}
 		abs := start + idx
-		// Check word boundaries.
 		before := abs == 0 || lower[abs-1] == ' '
 		after := abs+len(lword) >= len(lower) || lower[abs+len(lword)] == ' '
 		if before && after {

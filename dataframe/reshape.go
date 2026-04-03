@@ -179,6 +179,9 @@ func (df DataFrame) Unstack(idVars []string, colVar, colVal string) DataFrame {
 	if df.Err != nil {
 		return df
 	}
+	if len(idVars) == 0 {
+		return DataFrame{Err: fmt.Errorf("Unstack: idVars must not be empty")}
+	}
 	// Validate columns.
 	for _, c := range append(idVars, colVar, colVal) {
 		if df.ColIndex(c) < 0 {
