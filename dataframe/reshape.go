@@ -70,19 +70,56 @@ func (df DataFrame) Resample(colname string, freq ResampleFreq) ResampleGroups {
 		}
 	}
 
-	groups := make(map[string]DataFrame)
-	groupRows := make(map[string][]int)
+	// Use int64 Unix nanoseconds as the primary grouping key to avoid
+	// repeated string formatting per row. The string label is derived once
+	// per unique bucket for the output column.
+	type bucket struct {
+		label string
+	}
+	bucketByNs := make(map[int64]*bucket)
+	groupRows := make(map[int64][]int)
+
+	nsKey := func(t time.Time) int64 {
+		switch freq {
+		case ResampleHourly:
+			return t.Truncate(time.Hour).UnixNano()
+		case ResampleDaily:
+			y, m, d := t.Date()
+			return time.Date(y, m, d, 0, 0, 0, 0, t.Location()).UnixNano()
+		case ResampleWeekly:
+			y, w := t.ISOWeek()
+			// Anchor to Monday of that ISO week.
+			jan4 := time.Date(y, 1, 4, 0, 0, 0, 0, t.Location())
+			_, jan4w := jan4.ISOWeek()
+			monday := jan4.AddDate(0, 0, (w-jan4w)*7-int(jan4.Weekday())+1)
+			return monday.UnixNano()
+		case ResampleMonthly:
+			y, m, _ := t.Date()
+			return time.Date(y, m, 1, 0, 0, 0, 0, t.Location()).UnixNano()
+		case ResampleYearly:
+			return time.Date(t.Year(), 1, 1, 0, 0, 0, 0, t.Location()).UnixNano()
+		default:
+			return t.UnixNano()
+		}
+	}
+
 	for i := 0; i < df.nrows; i++ {
 		e := col.Elem(i)
 		if e.IsNA() {
 			continue
 		}
 		tv, _ := e.Time()
-		key := truncate(tv)
-		groupRows[key] = append(groupRows[key], i)
+		ns := nsKey(tv)
+		if _, ok := bucketByNs[ns]; !ok {
+			bucketByNs[ns] = &bucket{label: truncate(tv)}
+		}
+		groupRows[ns] = append(groupRows[ns], i)
 	}
-	for key, rows := range groupRows {
-		groups[key] = df.Subset(rows)
+
+	groups := make(map[string]DataFrame, len(groupRows))
+	for ns, rows := range groupRows {
+		label := bucketByNs[ns].label
+		groups[label] = df.Subset(rows)
 	}
 	return ResampleGroups{groups: groups, keyCol: colname, freq: freq}
 }
@@ -145,7 +182,7 @@ func (rg ResampleGroups) Aggregation(typs []AggregationType, colnames []string) 
 		s.Name = buildAggregatedColname(c, typs[i])
 		cols = append(cols, s)
 	}
-	return New(cols...)
+	return NewNoCopy(cols...)
 }
 
 // ============================================================================
@@ -203,22 +240,34 @@ func (df DataFrame) Unstack(idVars []string, colVar, colVal string) DataFrame {
 	sort.Strings(varVals)
 
 	// Build a composite key from idVars for each row.
+	// Pre-cache all idVar columns to avoid repeated df.Col() calls.
+	idCols := make([]series.Series, len(idVars))
+	for j, id := range idVars {
+		idCols[j] = df.Col(id)
+	}
 	rowKey := func(i int) string {
 		parts := make([]string, len(idVars))
-		for j, id := range idVars {
-			parts[j] = df.Col(id).Elem(i).String()
+		for j := range idVars {
+			parts[j] = idCols[j].Elem(i).String()
 		}
 		return strings.Join(parts, "\x00")
 	}
 
-	// Collect unique row keys (preserving order).
+	// Collect unique row keys (preserving order) and pre-parse their parts.
 	var rowKeys []string
 	rowKeySet := make(map[string]struct{})
+	// parsedParts[ri] holds the pre-split id values for row key ri.
+	var parsedParts [][]string
 	for i := 0; i < df.nrows; i++ {
 		k := rowKey(i)
 		if _, ok := rowKeySet[k]; !ok {
 			rowKeySet[k] = struct{}{}
 			rowKeys = append(rowKeys, k)
+			parts := make([]string, len(idVars))
+			for j := range idVars {
+				parts[j] = idCols[j].Elem(i).String()
+			}
+			parsedParts = append(parsedParts, parts)
 		}
 	}
 
@@ -255,9 +304,9 @@ func (df DataFrame) Unstack(idVars []string, colVar, colVal string) DataFrame {
 	}()
 
 	for ri, rk := range rowKeys {
-		parts := strings.Split(rk, "\x00")
+		// Use pre-parsed parts — no strings.Split per row.
 		for j := range idVars {
-			idData[j][ri] = parts[j]
+			idData[j][ri] = parsedParts[ri][j]
 		}
 		for vi, vv := range varVals {
 			k := rk + "\x01" + vv
@@ -278,7 +327,7 @@ func (df DataFrame) Unstack(idVars []string, colVar, colVal string) DataFrame {
 		s := series.New(valData[vi], series.String, vv)
 		cols = append(cols, s)
 	}
-	return New(cols...)
+	return NewNoCopy(cols...)
 }
 
 // ============================================================================
@@ -382,7 +431,7 @@ func (df DataFrame) Interpolate(method InterpolateMethod) DataFrame {
 		s.Name = col.Name
 		columns[i] = s
 	}
-	return New(columns...)
+	return NewNoCopy(columns...)
 }
 
 func isNaNFloat(v float64) bool {
@@ -449,7 +498,7 @@ func (df DataFrame) CrossTab(rowCol, colCol string) DataFrame {
 		s := series.New(vals, series.Int, cl)
 		cols = append(cols, s)
 	}
-	return New(cols...)
+	return NewNoCopy(cols...)
 }
 
 // uniqueStrings returns the unique non-NaN string values from a Series,

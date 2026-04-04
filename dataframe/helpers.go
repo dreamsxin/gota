@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/dreamsxin/gota/series"
@@ -151,4 +152,131 @@ func numWorkers() int {
 		return 1
 	}
 	return n
+}
+
+// parallelOrder returns the sort permutation for s using a parallel merge-sort
+// across numWorkers() goroutines. NaN elements are pushed to the end.
+// This is a drop-in replacement for series.Series.Order for large slices.
+func parallelOrder(s series.Series, reverse bool) []int {
+	n := s.Len()
+	workers := numWorkers()
+	if workers < 2 || n < 2 {
+		return s.Order(reverse)
+	}
+
+	// Split into chunks, sort each chunk in parallel, then merge.
+	chunkSize := (n + workers - 1) / workers
+	chunks := make([]sortChunk, 0, workers)
+
+	var wg sync.WaitGroup
+	mu := sync.Mutex{}
+
+	for start := 0; start < n; start += chunkSize {
+		end := start + chunkSize
+		if end > n {
+			end = n
+		}
+		wg.Add(1)
+		go func(lo, hi int) {
+			defer wg.Done()
+			sub := s.Subset(makeRange(lo, hi))
+			sorted := sub.Order(reverse)
+			// Translate back to original indexes.
+			for i, v := range sorted {
+				sorted[i] = lo + v
+			}
+			mu.Lock()
+			chunks = append(chunks, sortChunk{sorted})
+			mu.Unlock()
+		}(start, end)
+	}
+	wg.Wait()
+
+	// k-way merge of sorted chunks.
+	return kMerge(s, chunks, reverse)
+}
+
+// makeRange returns [lo, lo+1, ..., hi-1].
+func makeRange(lo, hi int) []int {
+	out := make([]int, hi-lo)
+	for i := range out {
+		out[i] = lo + i
+	}
+	return out
+}
+
+// sortChunk is a sorted index chunk used by parallelOrder / kMerge.
+type sortChunk struct{ idx []int }
+
+// heapEntry is a position pointer into a sortChunk, used by the k-way merge heap.
+type heapEntry struct {
+	chunkIdx int
+	pos      int
+}
+
+// kMerge merges pre-sorted index chunks into a single sorted permutation.
+func kMerge(s series.Series, chunks []sortChunk, reverse bool) []int {
+	heads := make([]heapEntry, 0, len(chunks))
+	for i, c := range chunks {
+		if len(c.idx) > 0 {
+			heads = append(heads, heapEntry{i, 0})
+		}
+	}
+
+	less := func(a, b int) bool {
+		ai := chunks[heads[a].chunkIdx].idx[heads[a].pos]
+		bi := chunks[heads[b].chunkIdx].idx[heads[b].pos]
+		ea := s.Elem(ai)
+		eb := s.Elem(bi)
+		if ea.IsNA() {
+			return false
+		}
+		if eb.IsNA() {
+			return true
+		}
+		if reverse {
+			return ea.Greater(eb)
+		}
+		return ea.Less(eb)
+	}
+
+	heapLen := len(heads)
+	for i := heapLen/2 - 1; i >= 0; i-- {
+		heapSiftDown(heads, i, heapLen, less)
+	}
+
+	result := make([]int, 0, s.Len())
+	for heapLen > 0 {
+		top := heads[0]
+		result = append(result, chunks[top.chunkIdx].idx[top.pos])
+		top.pos++
+		if top.pos >= len(chunks[top.chunkIdx].idx) {
+			heads[0] = heads[heapLen-1]
+			heapLen--
+		} else {
+			heads[0] = top
+		}
+		if heapLen > 0 {
+			heapSiftDown(heads, 0, heapLen, less)
+		}
+	}
+	return result
+}
+
+func heapSiftDown(h []heapEntry, i, n int, less func(a, b int) bool) {
+	for {
+		smallest := i
+		l, r := 2*i+1, 2*i+2
+		if l < n && less(l, smallest) {
+			smallest = l
+		}
+		if r < n && less(r, smallest) {
+			smallest = r
+		}
+		if smallest == i {
+			break
+		}
+		h[i], h[smallest] = h[smallest], h[i]
+		i = smallest
+	}
 }

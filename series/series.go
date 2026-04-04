@@ -1253,3 +1253,30 @@ func (s Series) Cov(other Series) float64 {
 	fc := float64(count)
 	return (sumXY - sumX*sumY/fc) / (fc - 1)
 }
+
+// StringsDirect constructs a String Series by directly wrapping the provided
+// slice without copying each element through Set(). The caller must not modify
+// the input slice after this call. This is faster than Strings() for large
+// pre-built slices.
+func StringsDirect(values []string) Series {
+	elems := make(stringElements, len(values))
+	for i, v := range values {
+		if v == "NaN" {
+			elems[i] = stringElement{"", true}
+		} else {
+			elems[i] = stringElement{v, false}
+		}
+	}
+	return Series{t: String, elements: elems}
+}
+
+// FloatsDirect constructs a Float Series by directly wrapping the provided
+// slice without per-element interface dispatch. Faster than Floats() for large
+// pre-built slices.
+func FloatsDirect(values []float64) Series {
+	elems := make(floatElements, len(values))
+	for i, v := range values {
+		elems[i] = floatElement{e: v, nan: v != v}
+	}
+	return Series{t: Float, elements: elems}
+}

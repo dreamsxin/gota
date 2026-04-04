@@ -1147,7 +1147,14 @@ func (df DataFrame) Arrange(order ...Order) DataFrame {
 		colname := order[i].Colname
 		idx := df.ColIndex(colname)
 		nextSeries := df.columns[idx].Subset(suborder)
-		suborder = nextSeries.Order(order[i].Reverse)
+
+		// Use parallel merge-sort for large DataFrames (> 100k rows).
+		const parallelThreshold = 100_000
+		if df.nrows > parallelThreshold {
+			suborder = parallelOrder(nextSeries, order[i].Reverse)
+		} else {
+			suborder = nextSeries.Order(order[i].Reverse)
+		}
 		swapOrigIdx(suborder)
 	}
 	return df.Subset(origIdx)
@@ -1336,6 +1343,14 @@ func (df DataFrame) RapplyParallel(f func(series.Series) series.Series) DataFram
 	types := df.Types()
 	rowType := detectType(types)
 
+	// Pool of empty Series to reduce per-goroutine allocations.
+	rowPool := &sync.Pool{
+		New: func() interface{} {
+			s := series.New(nil, rowType, "").Empty()
+			return &s
+		},
+	}
+
 	type rowResult struct {
 		idx   int
 		elems []series.Element
@@ -1353,12 +1368,17 @@ func (df DataFrame) RapplyParallel(f func(series.Series) series.Series) DataFram
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			row := series.New(nil, rowType, "").Empty()
+			// Reuse a pooled Series as the scratch row buffer.
+			rowPtr := rowPool.Get().(*series.Series)
+			row := *rowPtr
+			// Reset to empty before reuse.
+			row = row.Empty()
 			for _, col := range df.columns {
 				row.Append(col.Elem(rowIdx))
 			}
 			row = f(row)
 			if row.Err != nil {
+				rowPool.Put(rowPtr)
 				ch <- rowResult{idx: rowIdx, err: row.Err}
 				return
 			}
@@ -1366,6 +1386,10 @@ func (df DataFrame) RapplyParallel(f func(series.Series) series.Series) DataFram
 			for j := 0; j < row.Len(); j++ {
 				elems[j] = row.Elem(j)
 			}
+			// Return a fresh empty series to the pool.
+			empty := row.Empty()
+			*rowPtr = empty
+			rowPool.Put(rowPtr)
 			ch <- rowResult{idx: rowIdx, elems: elems}
 		}(i)
 	}
@@ -3183,7 +3207,7 @@ func (df DataFrame) Describe() DataFrame {
 		ss = append(ss, newCol)
 	}
 
-	ddf := New(ss...)
+	ddf := NewNoCopy(ss...)
 	return ddf
 }
 

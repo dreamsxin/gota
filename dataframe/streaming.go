@@ -294,21 +294,27 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 			lookup[strings.TrimSpace(v)] = struct{}{}
 		}
 		isIn := strings.ToLower(op) == "in"
+		// Cache string representations to avoid repeated conversion.
+		strs := make([]string, n)
 		for i := 0; i < n; i++ {
-			_, found := lookup[col.Elem(i).String()]
+			strs[i] = col.Elem(i).String()
+		}
+		for i, s := range strs {
+			_, found := lookup[s]
 			result[i] = found == isIn
 		}
 	default:
 		// Numeric comparison if possible, else string.
 		numVal, numErr := strconv.ParseFloat(valPart, 64)
-		for i := 0; i < n; i++ {
-			elem := col.Elem(i)
-			if elem.IsNA() {
-				result[i] = false
-				continue
-			}
-			if numErr == nil {
-				ev := elem.Float()
+		// Cache string/float representations once to avoid repeated fmt.Sprintf per row.
+		if numErr == nil {
+			floats := col.Float()
+			for i := 0; i < n; i++ {
+				if col.Elem(i).IsNA() {
+					result[i] = false
+					continue
+				}
+				ev := floats[i]
 				switch op {
 				case "==":
 					result[i] = ev == numVal
@@ -323,8 +329,15 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 				case "<=":
 					result[i] = ev <= numVal
 				}
-			} else {
-				es := elem.String()
+			}
+		} else {
+			strs := col.Records() // single allocation, no per-row fmt.Sprintf
+			for i := 0; i < n; i++ {
+				if col.Elem(i).IsNA() {
+					result[i] = false
+					continue
+				}
+				es := strs[i]
 				switch op {
 				case "==":
 					result[i] = es == valPart

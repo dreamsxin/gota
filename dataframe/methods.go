@@ -210,65 +210,59 @@ func (df DataFrame) ValueCounts(colname string, normalize bool, ascending bool) 
 	if df.Err != nil {
 		return df
 	}
-	
+
 	col := df.Col(colname)
 	if col.Err != nil {
 		return DataFrame{Err: col.Err}
 	}
-	
-	// Count occurrences
-	counts := make(map[string]int)
-	for i := 0; i < col.Len(); i++ {
-		key := col.Elem(i).String()
+
+	// Use Records() for a single bulk string conversion instead of per-element
+	// col.Elem(i).String() calls, which avoids repeated interface dispatch.
+	// Single bulk conversion — avoids per-element interface dispatch.
+	records := col.Records()
+	counts := make(map[string]int, len(records))
+	for _, key := range records {
 		counts[key]++
 	}
-	
-	// Convert to slices
-	values := make([]string, 0, len(counts))
-	countVals := make([]int, 0, len(counts))
+
+	// Sort directly on (value, count) pairs — eliminates the extra index slice.
+	type kv struct {
+		val   string
+		count int
+	}
+	pairs := make([]kv, 0, len(counts))
 	for v, c := range counts {
-		values = append(values, v)
-		countVals = append(countVals, c)
+		pairs = append(pairs, kv{v, c})
 	}
-	
-	// Sort by count
-	sortIdx := make([]int, len(countVals))
-	for i := range sortIdx {
-		sortIdx[i] = i
-	}
-	sort.Slice(sortIdx, func(i, j int) bool {
+	sort.Slice(pairs, func(i, j int) bool {
 		if ascending {
-			return countVals[sortIdx[i]] < countVals[sortIdx[j]]
+			return pairs[i].count < pairs[j].count
 		}
-		return countVals[sortIdx[i]] > countVals[sortIdx[j]]
+		return pairs[i].count > pairs[j].count
 	})
-	
-	// Build result
-	sortedValues := make([]string, len(values))
-	sortedCounts := make([]float64, len(countVals))
-	for i, idx := range sortIdx {
-		sortedValues[i] = values[idx]
+
+	sortedValues := make([]string, len(pairs))
+	sortedCounts := make([]float64, len(pairs))
+	total := float64(col.Len())
+	for i, p := range pairs {
+		sortedValues[i] = p.val
 		if normalize {
-			sortedCounts[i] = float64(countVals[idx]) / float64(col.Len())
+			sortedCounts[i] = float64(p.count) / total
 		} else {
-			sortedCounts[i] = float64(countVals[idx])
+			sortedCounts[i] = float64(p.count)
 		}
 	}
-	
-	resultCols := []series.Series{
-		series.Strings(sortedValues),
-		series.Floats(sortedCounts),
-	}
-	
+
+	vs := series.StringsDirect(sortedValues)
+	cs := series.FloatsDirect(sortedCounts)
 	if normalize {
-		resultCols[0].Name = colname
-		resultCols[1].Name = "proportion"
+		vs.Name = colname
+		cs.Name = "proportion"
 	} else {
-		resultCols[0].Name = colname
-		resultCols[1].Name = "count"
+		vs.Name = colname
+		cs.Name = "count"
 	}
-	
-	return New(resultCols...)
+	return NewNoCopy(vs, cs)
 }
 
 // ============================================================================

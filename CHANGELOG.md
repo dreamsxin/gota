@@ -5,6 +5,18 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 This document follows
 [markdownlint](https://github.com/markdownlint/markdownlint) formatting rules.
 
+## [2.3.0] - 2026-04-04
+
+### Changed (Performance)
+- `Query`: pre-fetch `col.Float()` / `col.Records()` once per clause — eliminates per-row `fmt.Sprintf` / interface dispatch
+- `Unstack`: pre-cache idVar columns and parsed row-key parts — eliminates repeated `df.Col()` + `strings.Split` per output row
+- `ValueCounts` (DataFrame): replaced per-element `col.Elem(i).String()` loop with single `col.Records()` bulk call
+- `RapplyParallel`: added `sync.Pool` for per-row scratch Series — reduces GC pressure on large DataFrames
+- `Resample`: groups keyed by `int64` Unix nanoseconds instead of formatted string — avoids `fmt.Sprintf` per row
+- `Arrange`: parallel merge-sort (k-way heap merge) for DataFrames > 100k rows using `numWorkers()` goroutines
+
+---
+
 ## [2.2.0] - 2026-04-04
 
 ### Added
@@ -385,5 +397,6 @@ This document follows
 [0.11.0]:https://github.com/dreamsxin/gota/compare/v0.10.1...v0.11.0
 [0.12.0]:https://github.com/dreamsxin/gota/compare/v0.11.0...v0.12.0
 
+[2.3.0]:https://github.com/dreamsxin/gota/compare/v2.2.0...v2.3.0
 [2.2.0]:https://github.com/dreamsxin/gota/compare/v2.0.0...v2.2.0
 [2.0.0]:https://github.com/dreamsxin/gota/compare/v1.1.0...v2.0.0

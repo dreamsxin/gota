@@ -96,12 +96,12 @@ Status markers: ✅ done · 🔧 partial / needs polish · ❌ not started
 - ✅ `DataFrame.CrossTab(row, col)` — contingency table (frequency cross-tabulation)
 
 ### v2.3 — Performance
-- ❌ `Query`: cache column string representations to avoid repeated `fmt.Sprintf` per row
-- ❌ `Unstack`: pre-parse composite row keys instead of repeated `strings.Split`
-- ❌ `ValueCounts` (DataFrame): use element hash instead of `String()` conversion as map key
-- ❌ `RapplyParallel`: use `sync.Pool` to reuse per-row Series objects
-- ❌ `Resample`: use `int64` Unix timestamp as map key instead of formatted string
-- ❌ Parallel `Arrange` for large DataFrames (parallel merge-sort)
+- ✅ `Query`: cache column string representations to avoid repeated `fmt.Sprintf` per row
+- ✅ `Unstack`: pre-parse composite row keys instead of repeated `strings.Split`
+- ✅ `ValueCounts` (DataFrame): use `Records()` bulk conversion instead of per-element `String()` calls
+- ✅ `RapplyParallel`: use `sync.Pool` to reuse per-row Series objects
+- ✅ `Resample`: use `int64` Unix nanosecond timestamp as map key instead of formatted string
+- ✅ Parallel `Arrange` for large DataFrames (parallel merge-sort, threshold 100k rows)
 
 ### v2.4 — I/O & Interop
 - ❌ Parquet read/write (`github.com/parquet-go/parquet-go`)

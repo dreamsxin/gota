@@ -197,3 +197,62 @@ func makeStrings(n, distinct int) []string {
 	}
 	return out
 }
+
+// -----------------------------------------------------------------------
+// v2.3 Performance benchmarks
+// -----------------------------------------------------------------------
+
+func BenchmarkDataFrame_Query_StringCol(b *testing.B) {
+	df := New(
+		series.New(makeStrings(100000, 5), series.String, "country"),
+	)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		df.Query("country == A")
+	}
+}
+
+func BenchmarkDataFrame_ValueCounts(b *testing.B) {
+	df := New(
+		series.New(makeStrings(100000, 5), series.String, "cat"),
+	)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		df.ValueCounts("cat", false, false)
+	}
+}
+
+func BenchmarkDataFrame_Arrange(b *testing.B) {
+	b.Run("10k", func(b *testing.B) {
+		df := New(series.New(makeFloats(10000), series.Float, "v"))
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			df.Arrange(Sort("v"))
+		}
+	})
+	b.Run("200k", func(b *testing.B) {
+		df := New(series.New(makeFloats(200000), series.Float, "v"))
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			df.Arrange(Sort("v"))
+		}
+	})
+}
+
+func BenchmarkDataFrame_RapplyParallel(b *testing.B) {
+	df := New(
+		series.New(makeFloats(10000), series.Float, "A"),
+		series.New(makeFloats(10000), series.Float, "B"),
+	)
+	f := func(s series.Series) series.Series { return s }
+	b.Run("Sequential", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			df.Rapply(f)
+		}
+	})
+	b.Run("Parallel", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			df.RapplyParallel(f)
+		}
+	})
+}
