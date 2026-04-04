@@ -21,6 +21,8 @@ type Categorical struct {
 	codes []int32
 	// Name of the column.
 	Name string
+	// vcCache is a lazily computed ValueCounts cache; nil means stale.
+	vcCache map[string]int
 }
 
 // NewCategorical creates a Categorical from a slice of strings.
@@ -126,13 +128,27 @@ func (c Categorical) IsNA(i int) bool {
 }
 
 // ValueCounts returns a map from category string to occurrence count.
-// NaN rows are not counted.
-func (c Categorical) ValueCounts() map[string]int {
+// NaN rows are not counted. The result is lazily cached and invalidated
+// automatically when SetValue or AddCategory is called.
+func (c *Categorical) ValueCounts() map[string]int {
+	if c.vcCache != nil {
+		// Return a copy so callers can't mutate the cache.
+		out := make(map[string]int, len(c.vcCache))
+		for k, v := range c.vcCache {
+			out[k] = v
+		}
+		return out
+	}
 	counts := make(map[string]int, len(c.categories))
 	for _, code := range c.codes {
 		if code >= 0 {
 			counts[c.categories[code]]++
 		}
+	}
+	// Store a copy in the cache.
+	c.vcCache = make(map[string]int, len(counts))
+	for k, v := range counts {
+		c.vcCache[k] = v
 	}
 	return counts
 }
@@ -162,6 +178,7 @@ func (c *Categorical) AddCategory(cat string) {
 	}
 	c.categories = append(c.categories, cat)
 	sort.Strings(c.categories)
+	c.vcCache = nil // invalidate cache
 }
 
 // SetValue sets the value at row i. Returns an error if cat is not in the
@@ -172,11 +189,13 @@ func (c *Categorical) SetValue(i int, cat string) error {
 	}
 	if cat == "" {
 		c.codes[i] = -1
+		c.vcCache = nil // invalidate cache
 		return nil
 	}
 	for j, existing := range c.categories {
 		if existing == cat {
 			c.codes[i] = int32(j)
+			c.vcCache = nil // invalidate cache
 			return nil
 		}
 	}

@@ -212,37 +212,65 @@ func (df DataFrame) Query(expr string) DataFrame {
 func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 	cond = strings.TrimSpace(cond)
 
+	// Support quoted column names: `"col name" > 5` or `'col name' == foo`
+	// Strip the surrounding quotes and extract the column name first.
+	var quotedCol string
+	if len(cond) > 0 && (cond[0] == '"' || cond[0] == '\'') {
+		quote := cond[0]
+		end := strings.IndexByte(cond[1:], quote)
+		if end >= 0 {
+			quotedCol = cond[1 : end+1]
+			cond = strings.TrimSpace(cond[end+2:])
+		}
+	}
+
 	// Operators ordered longest-first to avoid prefix ambiguity.
 	// "not in" must come before "in"; ">=" before ">"; "<=" before "<".
 	ops := []string{"not in", ">=", "<=", "!=", "==", ">", "<", "in"}
 	var op, colPart, valPart string
-	for _, candidate := range ops {
-		// Search case-insensitively, but require the operator to be surrounded
-		// by spaces (or at string boundaries) so that column names like
-		// "income" don't accidentally match "in".
-		lower := strings.ToLower(cond)
-		lc := strings.ToLower(candidate)
-		idx := 0
-		for {
-			pos := strings.Index(lower[idx:], lc)
-			if pos < 0 {
-				break
-			}
-			abs := idx + pos
-			before := abs == 0 || lower[abs-1] == ' '
-			after := abs+len(lc) >= len(lower) || lower[abs+len(lc)] == ' '
-			if before && after {
-				colPart = strings.TrimSpace(cond[:abs])
-				valPart = strings.TrimSpace(cond[abs+len(candidate):])
+
+	if quotedCol != "" {
+		// Column name was quoted; the remainder is "op value".
+		for _, candidate := range ops {
+			lc := strings.ToLower(candidate)
+			lower := strings.ToLower(cond)
+			if strings.HasPrefix(lower, lc+" ") || lower == lc {
 				op = candidate
+				valPart = strings.TrimSpace(cond[len(candidate):])
 				break
 			}
-			idx = abs + 1
 		}
-		if op != "" {
-			break
+		colPart = quotedCol
+	} else {
+		for _, candidate := range ops {
+			// Search case-insensitively, but require the operator to be surrounded
+			// by spaces (or at string boundaries) so that column names like
+			// "income" don't accidentally match "in".
+			lower := strings.ToLower(cond)
+			lc := strings.ToLower(candidate)
+			idx := 0
+			for {
+				pos := strings.Index(lower[idx:], lc)
+				if pos < 0 {
+					break
+				}
+				abs := idx + pos
+				before := abs == 0 || lower[abs-1] == ' '
+				after := abs+len(lc) >= len(lower) || lower[abs+len(lc)] == ' '
+				if before && after {
+					colPart = strings.TrimSpace(cond[:abs])
+					valPart = strings.TrimSpace(cond[abs+len(candidate):])
+					op = candidate
+					break
+				}
+				idx = abs + 1
+			}
+			if op != "" {
+				break
+			}
 		}
 	}
+
 	if op == "" {
 		return nil, fmt.Errorf("unrecognised expression: %q", cond)
 	}

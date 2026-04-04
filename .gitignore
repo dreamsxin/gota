@@ -6,3 +6,11 @@
 # vscode
 .vscode/
 *.code-workspace
+
+# Coverage reports
+coverage
+cov_df
+cov_df.txt
+cov_s
+cov_s.txt
+*.out

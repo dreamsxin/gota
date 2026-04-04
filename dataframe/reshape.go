@@ -240,6 +240,20 @@ func (df DataFrame) Unstack(idVars []string, colVar, colVal string) DataFrame {
 		valData[j] = make([]string, len(rowKeys))
 	}
 
+	// Determine the type of the value column for typed NaN filling.
+	valColSeries := df.Col(colVal)
+	valType := valColSeries.Type()
+	typedNaN := func() string {
+		switch valType {
+		case series.Float, series.Int:
+			return "NaN"
+		case series.Bool:
+			return "false"
+		default: // String, Time
+			return ""
+		}
+	}()
+
 	for ri, rk := range rowKeys {
 		parts := strings.Split(rk, "\x00")
 		for j := range idVars {
@@ -250,7 +264,7 @@ func (df DataFrame) Unstack(idVars []string, colVar, colVal string) DataFrame {
 			if v, ok := lookup[k]; ok {
 				valData[vi][ri] = v
 			} else {
-				valData[vi][ri] = "NaN"
+				valData[vi][ri] = typedNaN
 			}
 		}
 	}
@@ -265,4 +279,194 @@ func (df DataFrame) Unstack(idVars []string, colVar, colVal string) DataFrame {
 		cols = append(cols, s)
 	}
 	return New(cols...)
+}
+
+// ============================================================================
+// Interpolate — fill NaN values in numeric columns
+// ============================================================================
+
+// InterpolateMethod defines the interpolation strategy.
+type InterpolateMethod string
+
+const (
+	// InterpolateLinear fills NaN values using linear interpolation between
+	// the nearest non-NaN neighbours.
+	InterpolateLinear InterpolateMethod = "linear"
+	// InterpolateForward fills NaN values with the most recent non-NaN value
+	// (forward fill / ffill).
+	InterpolateForward InterpolateMethod = "forward"
+)
+
+// Interpolate fills NaN values in numeric (Float/Int) columns using the given
+// method. Non-numeric columns are left unchanged.
+//
+// Supported methods:
+//   - "linear"  — linear interpolation between surrounding non-NaN values
+//   - "forward" — forward fill (propagate last valid value)
+//
+// Example:
+//
+//	df2 := df.Interpolate("linear")
+//	df2 := df.Interpolate("forward")
+func (df DataFrame) Interpolate(method InterpolateMethod) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	columns := make([]series.Series, df.ncols)
+	for i, col := range df.columns {
+		if col.Type() != series.Float && col.Type() != series.Int {
+			columns[i] = col.Copy()
+			continue
+		}
+		floats := col.Float()
+		out := make([]float64, len(floats))
+		copy(out, floats)
+
+		switch method {
+		case InterpolateForward:
+			var last float64
+			hasLast := false
+			for j, v := range out {
+				if !isNaNFloat(v) {
+					last = v
+					hasLast = true
+				} else if hasLast {
+					out[j] = last
+				}
+			}
+		default: // linear
+			// Find runs of NaN and interpolate linearly between neighbours.
+			n := len(out)
+			j := 0
+			for j < n {
+				if !isNaNFloat(out[j]) {
+					j++
+					continue
+				}
+				// Found start of a NaN run at j.
+				start := j
+				for j < n && isNaNFloat(out[j]) {
+					j++
+				}
+				end := j // out[end] is the first non-NaN after the run (or n)
+				// Determine left and right anchor values.
+				leftIdx := start - 1
+				rightIdx := end
+				if leftIdx < 0 && rightIdx >= n {
+					// All NaN — leave as-is.
+					continue
+				}
+				if leftIdx < 0 {
+					// Leading NaN: forward fill from right anchor.
+					for k := start; k < end; k++ {
+						out[k] = out[rightIdx]
+					}
+				} else if rightIdx >= n {
+					// Trailing NaN: backward fill from left anchor.
+					for k := start; k < end; k++ {
+						out[k] = out[leftIdx]
+					}
+				} else {
+					// Interior NaN: linear interpolation.
+					leftVal := out[leftIdx]
+					rightVal := out[rightIdx]
+					span := float64(rightIdx - leftIdx)
+					for k := start; k < end; k++ {
+						t := float64(k-leftIdx) / span
+						out[k] = leftVal + t*(rightVal-leftVal)
+					}
+				}
+			}
+		}
+		s := series.Floats(out)
+		s.Name = col.Name
+		columns[i] = s
+	}
+	return New(columns...)
+}
+
+func isNaNFloat(v float64) bool {
+	return v != v // IEEE 754: NaN != NaN
+}
+
+// ============================================================================
+// CrossTab — contingency table
+// ============================================================================
+
+// CrossTab computes a frequency cross-tabulation (contingency table) of two
+// categorical columns. The result is a DataFrame where rows correspond to
+// unique values of rowCol, columns correspond to unique values of colCol, and
+// each cell contains the count of rows matching that (row, col) combination.
+// A leading "index" column holds the row labels.
+//
+// Example:
+//
+//	// df has columns "gender" and "grade"
+//	ct := df.CrossTab("gender", "grade")
+//	// Result: index | A | B | C | ...
+//	//         F     | 3 | 5 | 2 | ...
+//	//         M     | 4 | 2 | 6 | ...
+func (df DataFrame) CrossTab(rowCol, colCol string) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+	rowSeries := df.Col(rowCol)
+	if rowSeries.Err != nil {
+		return DataFrame{Err: fmt.Errorf("CrossTab: %v", rowSeries.Err)}
+	}
+	colSeries := df.Col(colCol)
+	if colSeries.Err != nil {
+		return DataFrame{Err: fmt.Errorf("CrossTab: %v", colSeries.Err)}
+	}
+
+	// Collect unique row and column labels (preserving first-seen order).
+	rowLabels := uniqueStrings(rowSeries)
+	colLabels := uniqueStrings(colSeries)
+	sort.Strings(rowLabels)
+	sort.Strings(colLabels)
+
+	// Build count matrix.
+	counts := make(map[string]map[string]int, len(rowLabels))
+	for _, r := range rowLabels {
+		counts[r] = make(map[string]int, len(colLabels))
+	}
+	for i := 0; i < df.nrows; i++ {
+		r := rowSeries.Elem(i).String()
+		c := colSeries.Elem(i).String()
+		if _, ok := counts[r]; ok {
+			counts[r][c]++
+		}
+	}
+
+	// Build output DataFrame.
+	indexCol := series.New(rowLabels, series.String, "index")
+	cols := []series.Series{indexCol}
+	for _, cl := range colLabels {
+		vals := make([]int, len(rowLabels))
+		for ri, rl := range rowLabels {
+			vals[ri] = counts[rl][cl]
+		}
+		s := series.New(vals, series.Int, cl)
+		cols = append(cols, s)
+	}
+	return New(cols...)
+}
+
+// uniqueStrings returns the unique non-NaN string values from a Series,
+// preserving first-seen order.
+func uniqueStrings(s series.Series) []string {
+	seen := make(map[string]struct{}, s.Len())
+	var out []string
+	for i := 0; i < s.Len(); i++ {
+		e := s.Elem(i)
+		if e.IsNA() {
+			continue
+		}
+		k := e.String()
+		if _, ok := seen[k]; !ok {
+			seen[k] = struct{}{}
+			out = append(out, k)
+		}
+	}
+	return out
 }

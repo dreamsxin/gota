@@ -280,3 +280,146 @@ func (s Series) Exp() Series {
 	result.Name = s.Name
 	return result
 }
+
+// ============================================================================
+// Statistical operations — Mode, Skewness, Kurtosis
+// ============================================================================
+
+// Mode returns the most frequent value in the Series as a new single-element
+// Series of the same type. If multiple values tie, the lexicographically
+// smallest string representation is returned. NaN values are ignored.
+// Returns an empty Series if all values are NaN or the Series is empty.
+//
+// Example:
+//
+//	s.Mode()
+func (s Series) Mode() Series {
+	if s.Err != nil {
+		return s
+	}
+	counts := make(map[string]int, s.Len())
+	order := make([]string, 0, s.Len())
+	for i := 0; i < s.Len(); i++ {
+		e := s.Elem(i)
+		if e.IsNA() {
+			continue
+		}
+		k := e.String()
+		if counts[k] == 0 {
+			order = append(order, k)
+		}
+		counts[k]++
+	}
+	if len(counts) == 0 {
+		return s.Empty()
+	}
+	maxCount := 0
+	for _, c := range counts {
+		if c > maxCount {
+			maxCount = c
+		}
+	}
+	var modes []string
+	for _, k := range order {
+		if counts[k] == maxCount {
+			modes = append(modes, k)
+		}
+	}
+	// Return the lexicographically smallest mode for determinism.
+	best := modes[0]
+	for _, m := range modes[1:] {
+		if m < best {
+			best = m
+		}
+	}
+	result := New([]string{best}, s.t, s.Name)
+	return result
+}
+
+// Skew returns the sample skewness of the Series using the adjusted Fisher-Pearson
+// standardized moment coefficient (same as pandas/Excel).
+// Returns NaN if n < 3 or all values are NaN.
+//
+// Example:
+//
+//	s.Skew()
+func (s Series) Skew() float64 {
+	if s.Err != nil {
+		return math.NaN()
+	}
+	var vals []float64
+	for i := 0; i < s.Len(); i++ {
+		e := s.Elem(i)
+		if !e.IsNA() {
+			vals = append(vals, e.Float())
+		}
+	}
+	n := float64(len(vals))
+	if n < 3 {
+		return math.NaN()
+	}
+	// Compute mean and std.
+	var sum float64
+	for _, v := range vals {
+		sum += v
+	}
+	mean := sum / n
+	var m2, m3 float64
+	for _, v := range vals {
+		d := v - mean
+		m2 += d * d
+		m3 += d * d * d
+	}
+	variance := m2 / (n - 1)
+	if variance == 0 {
+		return math.NaN()
+	}
+	std := math.Sqrt(variance)
+	// Adjusted Fisher-Pearson: G1 = (n/((n-1)*(n-2))) * sum((x-mean)^3/std^3)
+	skew := (n / ((n - 1) * (n - 2))) * (m3 / math.Pow(std, 3))
+	return skew
+}
+
+// Kurt returns the excess kurtosis of the Series using the unbiased estimator
+// (same as pandas default: Fisher's definition, normal == 0).
+// Returns NaN if n < 4 or all values are NaN.
+//
+// Example:
+//
+//	s.Kurt()
+func (s Series) Kurt() float64 {
+	if s.Err != nil {
+		return math.NaN()
+	}
+	var vals []float64
+	for i := 0; i < s.Len(); i++ {
+		e := s.Elem(i)
+		if !e.IsNA() {
+			vals = append(vals, e.Float())
+		}
+	}
+	n := float64(len(vals))
+	if n < 4 {
+		return math.NaN()
+	}
+	var sum float64
+	for _, v := range vals {
+		sum += v
+	}
+	mean := sum / n
+	var m2, m4 float64
+	for _, v := range vals {
+		d := v - mean
+		d2 := d * d
+		m2 += d2
+		m4 += d2 * d2
+	}
+	if m2 == 0 {
+		return math.NaN()
+	}
+	// Unbiased excess kurtosis (pandas formula):
+	// k = (n*(n+1)/((n-1)*(n-2)*(n-3))) * sum((x-mean)^4/std^4) - 3*(n-1)^2/((n-2)*(n-3))
+	variance := m2 / n
+	kurt := (n*(n+1)/((n-1)*(n-2)*(n-3)))*(m4/(variance*variance)) - 3*(n-1)*(n-1)/((n-2)*(n-3))
+	return kurt
+}

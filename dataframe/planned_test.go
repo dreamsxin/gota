@@ -92,9 +92,9 @@ func TestDataFrame_Describe_Time(t *testing.T) {
 	if tsCol.Err != nil {
 		t.Fatalf("Describe: ts column missing: %v", tsCol.Err)
 	}
-	// Row 3 (index 3) is "min", row 7 is "max" (0-indexed).
-	minVal := tsCol.Elem(3).String()
-	maxVal := tsCol.Elem(7).String()
+	// Row 5 (index 5) is "min", row 9 is "max" (0-indexed, after count/nunique).
+	minVal := tsCol.Elem(5).String()
+	maxVal := tsCol.Elem(9).String()
 	if minVal == "-" {
 		t.Error("Describe Time: min should not be '-'")
 	}

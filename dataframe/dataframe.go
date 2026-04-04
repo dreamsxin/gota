@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"reflect"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -652,7 +651,7 @@ func (gps Groups) AggregationParallel(typs []AggregationType, colnames []string)
 	}
 
 	ch := make(chan result, len(gps.groups))
-	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	sem := make(chan struct{}, numWorkers())
 	var wg sync.WaitGroup
 
 	for _, df := range gps.groups {
@@ -1181,7 +1180,7 @@ func (df DataFrame) CapplyParallel(f func(series.Series) series.Series) DataFram
 		s   series.Series
 	}
 	ch := make(chan result, df.ncols)
-	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	sem := make(chan struct{}, numWorkers())
 	var wg sync.WaitGroup
 	for i, s := range df.columns {
 		wg.Add(1)
@@ -1344,7 +1343,7 @@ func (df DataFrame) RapplyParallel(f func(series.Series) series.Series) DataFram
 	}
 
 	ch := make(chan rowResult, df.nrows)
-	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	sem := make(chan struct{}, numWorkers())
 	var wg sync.WaitGroup
 
 	for i := 0; i < df.nrows; i++ {
@@ -3090,6 +3089,8 @@ type Matrix interface {
 // Describe prints the summary statistics for each column of the dataframe
 func (df DataFrame) Describe() DataFrame {
 	labels := series.Strings([]string{
+		"count",
+		"nunique",
 		"mean",
 		"median",
 		"stddev",
@@ -3105,9 +3106,23 @@ func (df DataFrame) Describe() DataFrame {
 
 	for _, col := range df.columns {
 		var newCol series.Series
+		// Compute count (non-NaN) and nunique for all types.
+		nonNull := 0
+		seen := make(map[string]struct{}, col.Len())
+		for i := 0; i < col.Len(); i++ {
+			e := col.Elem(i)
+			if !e.IsNA() {
+				nonNull++
+				seen[e.String()] = struct{}{}
+			}
+		}
+		nunique := len(seen)
+
 		switch col.Type() {
 		case series.String:
 			newCol = series.New([]string{
+				fmt.Sprintf("%d", nonNull),
+				fmt.Sprintf("%d", nunique),
 				"-",
 				"-",
 				"-",
@@ -3126,6 +3141,8 @@ func (df DataFrame) Describe() DataFrame {
 			fallthrough
 		case series.Int:
 			newCol = series.New([]float64{
+				float64(nonNull),
+				float64(nunique),
 				col.Mean(),
 				col.Median(),
 				col.StdDev(),
@@ -3154,7 +3171,11 @@ func (df DataFrame) Describe() DataFrame {
 				}
 			}
 			newCol = series.New(
-				[]string{"-", "-", "-", minStr, "-", "-", "-", maxStr},
+				[]string{
+					fmt.Sprintf("%d", nonNull),
+					fmt.Sprintf("%d", nunique),
+					"-", "-", "-", minStr, "-", "-", "-", maxStr,
+				},
 				series.String,
 				col.Name,
 			)

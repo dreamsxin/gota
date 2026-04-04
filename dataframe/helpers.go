@@ -2,6 +2,7 @@ package dataframe
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -141,3 +142,13 @@ var (
 	defaultFloatElem  = series.New([]float64{0}, series.Float, "").Elem(0)
 	defaultBoolElem   = series.New([]bool{false}, series.Bool, "").Elem(0)
 )
+
+// numWorkers returns the number of parallel workers to use for concurrent
+// operations. It is at least 1 and at most GOMAXPROCS.
+func numWorkers() int {
+	n := runtime.GOMAXPROCS(0)
+	if n < 1 {
+		return 1
+	}
+	return n
+}

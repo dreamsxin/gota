@@ -5,7 +5,32 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 This document follows
 [markdownlint](https://github.com/markdownlint/markdownlint) formatting rules.
 
-## [Unreleased] — v1.3 / v1.4 / v1.5 / v1.6
+## [2.2.0] - 2026-04-04
+
+### Added
+
+#### DataFrame
+- `Describe`: added `count` and `nunique` rows to summary statistics
+- `Interpolate(method)` — fill NaN in numeric columns via `"linear"` or `"forward"` interpolation
+- `CrossTab(rowCol, colCol)` — frequency cross-tabulation (contingency table)
+- `ApplyMapTyped(f)` — element-wise map that preserves each column's original type
+- `Query`: quoted column name syntax (`"col name" > 5` / `'col name' == foo`) for columns containing spaces
+
+#### Series
+- `Mode()` — most frequent value (deterministic: lexicographically smallest on tie)
+- `Skew()` — adjusted Fisher-Pearson sample skewness (pandas-compatible)
+- `Kurt()` — unbiased excess kurtosis (pandas-compatible, normal == 0)
+
+#### Categorical
+- `ValueCounts()` — lazy cache; result is recomputed only after `SetValue` or `AddCategory`
+
+### Fixed
+- `Unstack`: missing `(rowKey, varVal)` cells now filled with typed NaN (`NaN` for Float/Int, `false` for Bool, `""` for String/Time) instead of the literal string `"NaN"`
+- `Query`: column names containing spaces now supported via quoted syntax
+
+---
+
+## [2.0.0] - 2026-04-03
 
 ### Added
 
@@ -359,3 +384,6 @@ This document follows
 [0.10.1]:https://github.com/dreamsxin/gota/compare/v0.10.0...v0.10.1
 [0.11.0]:https://github.com/dreamsxin/gota/compare/v0.10.1...v0.11.0
 [0.12.0]:https://github.com/dreamsxin/gota/compare/v0.11.0...v0.12.0
+
+[2.2.0]:https://github.com/dreamsxin/gota/compare/v2.0.0...v2.2.0
+[2.0.0]:https://github.com/dreamsxin/gota/compare/v1.1.0...v2.0.0

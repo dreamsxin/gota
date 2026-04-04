@@ -5,9 +5,9 @@ Status markers: ✅ done · 🔧 partial / needs polish · ❌ not started
 
 ---
 
-## Completed
+## Released: v2.0.0
 
-### Core DataFrame & Series (≤ v0.12.0)
+### Core DataFrame & Series (≤ v0.12.0 baseline)
 - ✅ `New`, `LoadRecords`, `LoadMaps`, `LoadStructs`, `LoadMatrix`
 - ✅ `ReadCSV` / `WriteCSV`, `ReadJSON` / `WriteJSON`, `ReadHTML`
 - ✅ `Subset`, `SliceRow`, `Select`, `Drop`, `Set`, `Mutate`, `Rename`
@@ -16,123 +16,109 @@ Status markers: ✅ done · 🔧 partial / needs polish · ❌ not started
 - ✅ `CBind`, `RBind`, `Concat`
 - ✅ `InnerJoin`, `LeftJoin`, `RightJoin`, `OuterJoin`, `CrossJoin` (hash-join O(n+m))
 - ✅ `GroupBy` + `Aggregation` (MAX/MIN/MEAN/MEDIAN/STD/SUM/COUNT)
-- ✅ `GroupBy.Apply`, `GroupBy.Transform`, `GroupBy.GetGroups`
-- ✅ `Capply`, `Rapply`
-- ✅ `Pivot` (spreadsheet-style pivot table)
-- ✅ `Describe`, `Duplicated`, `DropDuplicates`
-- ✅ `FillNaN`, `DropNA` (any/all, subset)
-- ✅ `FillNAStrategy` / `FillNAStrategyLimit` (ffill / bfill with limit)
-- ✅ `CumSum`, `CumProd`, `Diff`, `PctChange`
-- ✅ `Corr`, `Cov` (Pearson correlation / sample covariance matrix)
-- ✅ `Melt` (wide → long)
+- ✅ `GroupBy.Apply`, `GroupBy.Transform` (row-order preserved), `GroupBy.GetGroups`
+- ✅ `Capply`, `Rapply`, `CapplyParallel`, `RapplyParallel`, `AggregationParallel`
+- ✅ `Pivot`, `Describe`, `Duplicated`, `DropDuplicates`
+- ✅ `FillNaN`, `DropNA`, `FillNAStrategy` / `FillNAStrategyLimit`
+- ✅ `CumSum`, `CumProd`, `Diff`, `PctChange`, `Shift`
+- ✅ `Corr`, `Cov`, `Melt`, `Stack`, `Unstack`, `Resample`
 - ✅ `Head`, `Tail`, `Info`, `ValueCounts`, `NLargest`, `NSmallest`, `Sample`
-- ✅ `IsNull` / `IsNA`, `NotNull` / `NotNA`
-- ✅ `Clip`, `ClipColumn`, `Replace`, `ReplaceInColumn`, `Astype`
-- ✅ `Between`, `IsIn`, `FilterIsIn`
+- ✅ `IsNull`/`IsNA`, `NotNull`/`NotNA`, `Clip`, `ClipColumn`, `Replace`, `ReplaceInColumn`
+- ✅ `Between`, `IsIn`, `FilterIsIn`, `Astype`
 - ✅ `Pipe`, `PipeWithArgs`, `ApplyMap`
-- ✅ `GetRow`, `Records`, `Maps`, `Elem`, `Col`, `ColIndex`, `Names`, `Types`
-- ✅ `gonum/mat.Matrix` interface (`At`, `T`, `Dims`, `LoadMatrix`)
+- ✅ `Assign`, `Explode`, `ExplodeOn`, `Query`, `RenameAll`, `AsCategorical`
+- ✅ `gonum/mat.Matrix` interface
 
 ### Series
-- ✅ Types: `Int` (int64), `Float` (float64), `String`, `Bool`, `Time`
-- ✅ `FillNaNForward` / `FillNaNBackward`
-- ✅ `FillNaNForwardLimit` / `FillNaNBackwardLimit`
-- ✅ `Rolling` window: `Mean`, `Sum`, `Min`, `Max`, `StdDev`, `Apply`
-- ✅ `EWM`: `Mean`, `Var`, `Std` (adjusted & non-adjusted, `MinPeriods`, `IgnoreNA`)
-- ✅ `CumSum`, `CumProd`, `CumMax`, `CumMin`
-- ✅ `Diff`, `PctChange`
-- ✅ `Corr`, `Cov`
-- ✅ `Unique`, `NUnique`, `ValueCounts`
-- ✅ `BatchConvert[T]` generics + typed helpers (`BatchConvertInts` etc.)
-- ✅ `Order` (stable sort, NaN pushed to end)
-- ✅ `Map`, `Slice`, `Subset`, `Concat`, `Append`
+- ✅ Types: `Int`, `Float`, `String`, `Bool`, `Time`
+- ✅ `FillNaNForward/Backward`, `FillNaNForwardLimit/BackwardLimit`
+- ✅ `Rolling`: `Mean`, `Sum`, `Min`, `Max`, `StdDev` (Welford O(n)), `Apply`
+- ✅ `EWM`: `Mean`, `Var`, `Std` (pandas-compatible Bessel correction)
+- ✅ `CumSum`, `CumProd`, `CumMax`, `CumMin`, `Diff`, `PctChange`
+- ✅ `Corr`, `Cov`, `Unique`, `NUnique`, `ValueCounts`
+- ✅ `Clip`, `Replace`, `Between`, `IsIn`
+- ✅ `Abs`, `Round`, `Sign`, `Pow`, `Sqrt`, `Log`, `Log10`, `Exp`
+- ✅ `BatchConvert[T]` generics, `Order`, `Map`, `Slice`, `Subset`, `Concat`, `Append`
+- ✅ `Categorical` type (dictionary encoding, `NewCategorical`, `CategoricalFromSeries`, `ToSeries`)
 - ✅ `Mean`, `StdDev`, `Median`, `Min`, `Max`, `Sum`, `Quantile`
 
 ### I/O
-- ✅ Excel read/write (`ReadXLSX`, `WriteXLSX`, `ReadXLSXFile`, `WriteXLSXFile`) via excelize, no CGO
-- ✅ SQL read/write (`FromSQL`, `WriteSQL`) with batched INSERT, CREATE TABLE, TRUNCATE options
+- ✅ Excel: `ReadXLSX`/`WriteXLSX` (no CGO), `WithSheet`, `WriteXLSXMultiSheet`
+- ✅ SQL: `FromSQL`, `WriteSQL` (batched INSERT, named placeholders `?`/`$1`/`@p1`)
+- ✅ CSV: `ReadCSV`, `WriteCSV`, `ScanCSV` (streaming, large-file safe)
+- ✅ JSON: `ReadJSON`, `WriteJSON`, `ReadNDJSON`, `WriteNDJSON` (JSON Lines)
+- ✅ HTML: `ReadHTML`
 
 ### Index
-- ✅ `Index` (single-level label index): `Loc`, `LocSlice`, `WithIndex`, `WithColumnIndex`, `ResetIndex`
+- ✅ `Index` (single-level): `Loc`, `LocSlice`, `WithIndex`, `WithColumnIndex`, `ResetIndex`
 - ✅ `MultiIndex` (hierarchical): `Loc` with partial key lookup, `WithMultiIndex`
 
 ### Infrastructure
-- ✅ Go 1.24 module, Go generics (1.18+) used in `BatchConvert`
-- ✅ `sync.Pool` for Series and element slice reuse (`pool.go`)
-- ✅ `NewNoCopy` constructor for zero-copy DataFrame creation
-- ✅ Hash-join replacing O(n²) nested-loop joins
-- ✅ O(n) sliding-window algorithms for `Rolling.Min` / `Rolling.Max` (monotonic deque)
-- ✅ Structured error type (`dataframe.Error`) with Op / Col / Row context
+- ✅ Go 1.24 module, Go generics (1.18+)
+- ✅ `sync.Pool` for Series reuse (`GetSeries`/`PutSeries`)
+- ✅ `NewNoCopy` zero-copy constructor
+- ✅ Hash-join O(n+m), monotonic deque O(n) for `Rolling.Min`/`Max`
+- ✅ `numWorkers()` helper — GOMAXPROCS guard (min 1)
+- ✅ Structured error type with Op/Col/Row context
 
 ---
 
-## In Progress / Needs Polish
+## v2.1 — In Progress (current)
 
-### Rolling / EWM
-- ✅ `Rolling.StdDev` rewritten with Welford's online sliding-window algorithm (O(n))
-- ✅ `EWM.Var` / `EWM.Std` rewritten with pandas-compatible weighted Bessel correction; verified against reference values
+### Fixes applied since v2.0.0
+- ✅ `Clip` / `ClipColumn`: NaN values are now preserved (not clipped to bounds)
+- ✅ `Between`: returns error when `left > right` instead of silently returning all-false
+- ✅ `Explode` → `ExplodeOn(col, sep)`: custom separator support; `Explode` is now a comma shortcut
+- ✅ `Info`: non-null count and memory estimate merged into a single O(n) pass
+- ✅ `CapplyParallel` / `RapplyParallel` / `AggregationParallel`: `numWorkers()` guard prevents zero-size semaphore when `GOMAXPROCS=0`
+- ✅ `ScanCSV`: deep-copy each batch row slice before passing to `LoadRecords` (prevents cross-batch data corruption)
+- ✅ Test coverage: `Head`, `Tail`, `Info`, `IsNull`/`NotNull`, `ValueCounts`, `NLargest`/`NSmallest`, `Sample`, `Pipe`/`PipeWithArgs`/`ApplyMap`, `Clip`/`ClipColumn`, `Replace`/`ReplaceInColumn`, `Astype`, `Between`, `IsIn`/`FilterIsIn`, `ExplodeOn`, `Resample` all frequencies, `WriteXLSXMultiSheet`, `Categorical.Rename`
 
-### DataFrame
-- ✅ `Describe` shows min/max RFC3339 timestamps for `Time` columns
-- ✅ `Info` memory estimate uses actual string lengths for String columns
-- ✅ `Sample` without replacement preserves sampled row order (removed spurious `sort.Ints`)
+### Still open in v2.1
+- 🔧 `Query`: column names containing spaces are not supported (operator search uses space as word boundary)
+- 🔧 `Unstack`: missing (rowKey, varVal) combinations filled with `"NaN"` string instead of typed NaN
+- 🔧 `ApplyMap`: column type may change to String when function returns a different type — no type-preservation option
+- 🔧 `Categorical`: no cache for `ValueCounts`; repeated calls re-scan all codes
 
 ---
 
 ## Planned
 
-### v1.2 — Correctness & Stability
-- ✅ Fix `GroupBy.Transform` row-order preservation
-- ✅ Add `Time` type support to `GroupBy` key builder
-- ✅ Comprehensive `Time` Series tests
-- ✅ Make pool element helpers unexported
-- ✅ `Rolling.StdDev` — Welford's online algorithm, O(n)
-- ✅ Verify `EWM.Var` / `EWM.Std` against pandas reference values; rewritten with correct formula
-- ✅ `Describe` — show `min` / `max` for `Time` columns as RFC3339 strings
+## v2.2 — Released 2026-04-04
+- ✅ `Query`: support quoted column names for columns containing spaces (`"col name" > 5`)
+- ✅ `Unstack`: fill missing cells with typed NaN (Float NaN / empty String / false Bool) instead of `"NaN"` string
+- ✅ `ApplyMapTyped(f)`: type-preserving variant of `ApplyMap`
+- ✅ `Categorical.ValueCounts`: lazy cache invalidated on `SetValue`/`AddCategory`
+- ✅ `DataFrame.Describe`: added `count` and `nunique` rows
+- ✅ `Series.Mode()` — most frequent value
+- ✅ `Series.Skew()` / `Series.Kurt()` — skewness and kurtosis
+- ✅ `DataFrame.Interpolate(method)` — linear / forward-fill interpolation for numeric columns
+- ✅ `DataFrame.CrossTab(row, col)` — contingency table (frequency cross-tabulation)
 
-### v1.3 — Missing pandas-equivalent APIs
-- ✅ `DataFrame.Shift(periods int, subset ...string)`
-- ✅ `DataFrame.Resample(colname, freq)` — time-based grouping with `Aggregation`
-- ✅ `DataFrame.Stack` / `Unstack` — wide↔long reshape
-- ✅ `Series.Clip`, `Series.Replace`, `Series.Between`, `Series.IsIn`
-- ✅ `DataFrame.Explode(col)` — expand comma-separated column into rows
-- ✅ `DataFrame.Assign(name, fn)` — add computed column via function
-- ✅ `DataFrame.Query(expr)` — expression-based row filter (col op val, AND/OR, in/not in)
+### v2.3 — Performance
+- ❌ `Query`: cache column string representations to avoid repeated `fmt.Sprintf` per row
+- ❌ `Unstack`: pre-parse composite row keys instead of repeated `strings.Split`
+- ❌ `ValueCounts` (DataFrame): use element hash instead of `String()` conversion as map key
+- ❌ `RapplyParallel`: use `sync.Pool` to reuse per-row Series objects
+- ❌ `Resample`: use `int64` Unix timestamp as map key instead of formatted string
+- ❌ Parallel `Arrange` for large DataFrames (parallel merge-sort)
 
-### v1.4 — Performance
-- ✅ Parallel `Capply` via `CapplyParallel` using `GOMAXPROCS` worker pool
-- ✅ Parallel `Rapply` via `RapplyParallel` — row order preserved
-- ✅ Parallel `GroupBy` aggregation via `AggregationParallel`
-- ❌ Arrow / columnar memory layout option for numeric columns
-- ❌ Lazy evaluation / query plan for chained operations
-- ❌ SIMD-friendly float operations via `gonum/blas`
+### v2.4 — I/O & Interop
+- ❌ Parquet read/write (`github.com/parquet-go/parquet-go`)
+- ❌ `WriteSQL`: support `ON CONFLICT` / `UPSERT` for PostgreSQL and SQLite
+- ❌ `ReadCSV` / `ScanCSV`: auto-detect delimiter (comma, tab, semicolon, pipe)
+- ❌ `WriteXLSX`: cell formatting options (number format, bold header, column width)
+- ❌ `ReadXLSX`: read all sheets at once → `map[string]DataFrame`
 
-### v1.5 — I/O & Interop
-- ❌ Parquet read/write
-- ✅ `ReadXLSX` sheet selection via `WithSheet(name)` option — fully wired
-- ✅ `WriteSQL` named placeholders — `SQLPlaceholderDollar` ($1) for PostgreSQL, `SQLPlaceholderAt` (@p1) for SQL Server
-- ✅ `ReadCSV` streaming mode — `ScanCSV(r, batchSize, fn)` for large files
-- ✅ JSON Lines (`ndjson`) — `ReadNDJSON` / `WriteNDJSON`
-
-### v1.6 — Type System
-- ✅ `Categorical` type — dictionary-encoded low-cardinality string column
-- ✅ `Series.Abs`, `Round`, `Sign`, `Pow`, `Sqrt`, `Log`, `Log10`, `Exp` — math operations
-- ✅ `DataFrame.RenameAll(map)` — batch column rename
-- ✅ `DataFrame.AsCategorical(col)` — DataFrame-level Categorical integration
-- ✅ `WriteXLSXMultiSheet` — multi-sheet XLSX output
-- ❌ Nullable typed columns (`Int64?`, `Float64?`) without boxing every element
+### v2.5 — Type System
+- ❌ Nullable typed columns (`NullableInt`, `NullableFloat`) without boxing every element
 - ❌ `Decimal` type for exact fixed-point arithmetic (financial use cases)
-- ❌ Reduce `interface{}` usage — migrate to typed generics where Go version allows
-
-### Bug Fixes (post v1.5)
-- ✅ `Query`: operator search now requires word boundaries
-- ✅ `GetGroups` / `Apply`: hidden `__groupby_row_idx__` column stripped
-- ✅ `Unstack`: returns error on empty `idVars`
-- ✅ `ScanCSV`: batch slice copied before `LoadRecords`
-- ✅ `ReadNDJSON`: scanner buffer raised to 10 MB
-- ✅ `mat.Div`: division by zero returns NaN instead of 0
+- ❌ Reduce `interface{}` usage — migrate hot paths to typed generics
+- ❌ `Enum` type — ordered categorical with defined value set and comparison operators
 
 ### Long-term / Research
 - ❌ Distributed DataFrame (chunked across goroutines or nodes)
 - ❌ GPU-accelerated numeric operations
 - ❌ Python interop via gRPC / shared memory for pandas round-trip
+- ❌ Arrow / columnar memory layout for zero-copy interop with Apache Arrow
+- ❌ Lazy evaluation / query plan for chained operations (avoid intermediate copies)

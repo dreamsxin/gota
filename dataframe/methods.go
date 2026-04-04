@@ -3,6 +3,7 @@ package dataframe
 import (
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"sort"
 	"strings"
@@ -92,20 +93,10 @@ func (df DataFrame) Info(w io.Writer) {
 		}
 	}
 	
-	// Count non-null values per column
+	// Count non-null values per column and estimate memory in a single pass.
+	totalBytes := 0
 	for i, col := range df.columns {
 		nonNull := 0
-		for j := 0; j < df.nrows; j++ {
-			if !col.Elem(j).IsNA() {
-				nonNull++
-			}
-		}
-		fmt.Fprintf(w, "   %-*s  %d non-null   %s\n", maxNameLen, colnames[i], nonNull, types[i])
-	}
-	
-	// Estimate memory usage
-	totalBytes := 0
-	for _, col := range df.columns {
 		switch col.Type() {
 		case series.Int:
 			totalBytes += df.nrows * 8
@@ -113,14 +104,19 @@ func (df DataFrame) Info(w io.Writer) {
 			totalBytes += df.nrows * 8
 		case series.Bool:
 			totalBytes += df.nrows * 1
-		case series.String:
-			// Use actual string lengths for a more accurate estimate.
-			for j := 0; j < df.nrows; j++ {
-				totalBytes += 16 + len(col.Elem(j).String()) // string header + data
-			}
 		case series.Time:
-			totalBytes += df.nrows * 24 // time.Time is 24 bytes
+			totalBytes += df.nrows * 24
 		}
+		for j := 0; j < df.nrows; j++ {
+			e := col.Elem(j)
+			if !e.IsNA() {
+				nonNull++
+			}
+			if col.Type() == series.String {
+				totalBytes += 16 + len(e.String())
+			}
+		}
+		fmt.Fprintf(w, "   %-*s  %d non-null   %s\n", maxNameLen, colnames[i], nonNull, types[i])
 	}
 	
 	if totalBytes > 1024*1024 {
@@ -394,8 +390,34 @@ func (df DataFrame) PipeWithArgs(f func(DataFrame, ...interface{}) DataFrame, ar
 	return f(df, args...)
 }
 
-// ApplyMap applies a function element-wise to the entire DataFrame.
-// Similar to pandas applymap().
+// ApplyMapTyped applies a function element-wise to the entire DataFrame,
+// preserving each column's original type. The function receives and returns
+// interface{} values; the result is cast back to the column's original type.
+//
+// Example:
+//
+//	df2 := df.ApplyMapTyped(func(val interface{}) interface{} {
+//	    if f, ok := val.(float64); ok {
+//	        return f * 2
+//	    }
+//	    return val
+//	})
+func (df DataFrame) ApplyMapTyped(f func(interface{}) interface{}) DataFrame {
+	if df.Err != nil {
+		return df
+	}
+
+	columns := make([]series.Series, df.ncols)
+	for i, col := range df.columns {
+		elements := make([]interface{}, df.nrows)
+		for j := 0; j < df.nrows; j++ {
+			elements[j] = f(col.Elem(j).Val())
+		}
+		columns[i] = series.New(elements, col.Type(), col.Name)
+	}
+
+	return New(columns...)
+}
 //
 // Example:
 //   df2 := df.ApplyMap(func(val interface{}) interface{} {
@@ -450,6 +472,10 @@ func (df DataFrame) Clip(lower, upper *float64) DataFrame {
 		floats := col.Float()
 		clipped := make([]float64, len(floats))
 		for j, v := range floats {
+			if math.IsNaN(v) {
+				clipped[j] = v
+				continue
+			}
 			clipped[j] = v
 			if lower != nil && v < *lower {
 				clipped[j] = *lower
@@ -488,6 +514,10 @@ func (df DataFrame) ClipColumn(colname string, lower, upper *float64) DataFrame 
 	floats := col.Float()
 	clipped := make([]float64, len(floats))
 	for j, v := range floats {
+		if math.IsNaN(v) {
+			clipped[j] = v
+			continue
+		}
 		clipped[j] = v
 		if lower != nil && v < *lower {
 			clipped[j] = *lower
@@ -640,7 +670,9 @@ func (df DataFrame) Between(colname string, left, right float64, inclusive strin
 	if df.Err != nil {
 		return series.Series{Err: df.Err}
 	}
-	
+	if left > right {
+		return series.Series{Err: fmt.Errorf("Between: left (%v) must be <= right (%v)", left, right)}
+	}
 	col := df.Col(colname)
 	if col.Err != nil {
 		return col
@@ -771,12 +803,25 @@ func (df DataFrame) Assign(name string, f func(DataFrame) series.Series) DataFra
 //	// "tags" column contains "go,python,rust" → 3 rows
 //	df2 := df.Explode("tags")
 func (df DataFrame) Explode(colname string) DataFrame {
+	return df.ExplodeOn(colname, ",")
+}
+
+// ExplodeOn is like Explode but uses a custom separator string.
+//
+// Example:
+//
+//	df2 := df.ExplodeOn("tags", "|")   // pipe-separated
+//	df2 := df.ExplodeOn("path", "/")   // slash-separated
+func (df DataFrame) ExplodeOn(colname, sep string) DataFrame {
 	if df.Err != nil {
 		return df
 	}
+	if sep == "" {
+		return DataFrame{Err: fmt.Errorf("ExplodeOn: separator must not be empty")}
+	}
 	idx := df.ColIndex(colname)
 	if idx < 0 {
-		return DataFrame{Err: fmt.Errorf("Explode: column %q not found", colname)}
+		return DataFrame{Err: fmt.Errorf("ExplodeOn: column %q not found", colname)}
 	}
 
 	// Build new columns: same types, empty.
@@ -788,8 +833,7 @@ func (df DataFrame) Explode(colname string) DataFrame {
 
 	for row := 0; row < df.nrows; row++ {
 		cell := df.columns[idx].Elem(row).String()
-		// Split on comma; trim spaces.
-		parts := strings.Split(cell, ",")
+		parts := strings.Split(cell, sep)
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
 			for ci, col := range df.columns {
