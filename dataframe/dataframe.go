@@ -489,38 +489,33 @@ func (df DataFrame) GroupBy(colnames ...string) *Groups {
 		keyIdxs[i] = idx
 	}
 
-	groupOrder, groupCodes, groupRowList := df.factorizeGroups(keyIdxs)
+	groupOrder, groupCodes, groupCounts := df.factorizeGroups(keyIdxs)
+	groupFirstRows := buildGroupFirstRows(groupCodes, len(groupOrder))
 	return &Groups{
-		colnames:     colnames,
-		source:       df,
-		keyIdxs:      keyIdxs,
-		groupOrder:   groupOrder,
-		groupCodes:   groupCodes,
-		groupRowList: groupRowList,
-		nrows:        df.nrows,
+		colnames:       colnames,
+		source:         df,
+		keyIdxs:        keyIdxs,
+		groupOrder:     groupOrder,
+		groupCodes:     groupCodes,
+		groupCounts:    groupCounts,
+		groupFirstRows: groupFirstRows,
+		nrows:          df.nrows,
 	}
 }
 
-func (df DataFrame) factorizeGroups(keyIdxs []int) ([]string, []int, [][]int) {
+func (df DataFrame) factorizeGroups(keyIdxs []int) ([]string, []int, []int) {
 	if len(keyIdxs) != 1 {
 		return df.factorizeCompositeGroups(keyIdxs)
 	}
 	col := df.columns[keyIdxs[0]]
-	switch col.Type() {
-	case series.Int:
-		return factorizeIntGroups(col, df.nrows)
-	case series.Bool:
-		return factorizeBoolGroups(col, df.nrows)
-	case series.Float:
-		return factorizeFloatGroups(col, df.nrows)
-	case series.String:
-		return factorizeStringGroups(col, df.nrows)
-	default:
+	labels, codes, counts, ok := col.Factorize()
+	if !ok {
 		return df.factorizeCompositeGroups(keyIdxs)
 	}
+	return labels, codes, counts
 }
 
-func (df DataFrame) factorizeCompositeGroups(keyIdxs []int) ([]string, []int, [][]int) {
+func (df DataFrame) factorizeCompositeGroups(keyIdxs []int) ([]string, []int, []int) {
 	groupIDs := make(map[string]int)
 	groupOrder := make([]string, 0)
 	groupCodes := make([]int, df.nrows)
@@ -537,7 +532,7 @@ func (df DataFrame) factorizeCompositeGroups(keyIdxs []int) ([]string, []int, []
 		groupCodes[row] = groupID
 		groupCounts[groupID]++
 	}
-	return groupOrder, groupCodes, buildGroupRowList(groupCodes, groupCounts)
+	return groupOrder, groupCodes, groupCounts
 }
 
 func buildGroupRowList(groupCodes []int, groupCounts []int) [][]int {
@@ -554,145 +549,17 @@ func buildGroupRowList(groupCodes []int, groupCounts []int) [][]int {
 	return groupRowList
 }
 
-func factorizeStringGroups(col series.Series, nrows int) ([]string, []int, [][]int) {
-	groupIDs := make(map[string]int)
-	groupOrder := make([]string, 0)
-	groupCodes := make([]int, nrows)
-	groupCounts := make([]int, 0)
-	for row := 0; row < nrows; row++ {
-		elem := col.Elem(row)
-		key := "<nil>"
-		if !elem.IsNA() {
-			key = elem.String()
-		}
-		groupID, ok := groupIDs[key]
-		if !ok {
-			groupID = len(groupOrder)
-			groupIDs[key] = groupID
-			groupOrder = append(groupOrder, key)
-			groupCounts = append(groupCounts, 0)
-		}
-		groupCodes[row] = groupID
-		groupCounts[groupID]++
+func buildGroupFirstRows(groupCodes []int, nGroups int) []int {
+	firstRows := make([]int, nGroups)
+	for i := range firstRows {
+		firstRows[i] = -1
 	}
-	return groupOrder, groupCodes, buildGroupRowList(groupCodes, groupCounts)
-}
-
-func factorizeIntGroups(col series.Series, nrows int) ([]string, []int, [][]int) {
-	groupIDs := make(map[int64]int)
-	groupOrder := make([]string, 0)
-	groupCodes := make([]int, nrows)
-	groupCounts := make([]int, 0)
-	naGroup := -1
-	for row := 0; row < nrows; row++ {
-		elem := col.Elem(row)
-		var groupID int
-		if elem.IsNA() {
-			if naGroup == -1 {
-				naGroup = len(groupOrder)
-				groupOrder = append(groupOrder, "<nil>")
-				groupCounts = append(groupCounts, 0)
-			}
-			groupID = naGroup
-		} else {
-			key, err := elem.Int64()
-			if err != nil {
-				if naGroup == -1 {
-					naGroup = len(groupOrder)
-					groupOrder = append(groupOrder, "<nil>")
-					groupCounts = append(groupCounts, 0)
-				}
-				groupID = naGroup
-			} else {
-				var ok bool
-				groupID, ok = groupIDs[key]
-				if !ok {
-					groupID = len(groupOrder)
-					groupIDs[key] = groupID
-					groupOrder = append(groupOrder, strconv.FormatInt(key, 10))
-					groupCounts = append(groupCounts, 0)
-				}
-			}
+	for row, groupID := range groupCodes {
+		if firstRows[groupID] == -1 {
+			firstRows[groupID] = row
 		}
-		groupCodes[row] = groupID
-		groupCounts[groupID]++
 	}
-	return groupOrder, groupCodes, buildGroupRowList(groupCodes, groupCounts)
-}
-
-func factorizeBoolGroups(col series.Series, nrows int) ([]string, []int, [][]int) {
-	groupIDs := make(map[bool]int, 2)
-	groupOrder := make([]string, 0, 3)
-	groupCodes := make([]int, nrows)
-	groupCounts := make([]int, 0, 3)
-	naGroup := -1
-	for row := 0; row < nrows; row++ {
-		elem := col.Elem(row)
-		var groupID int
-		if elem.IsNA() {
-			if naGroup == -1 {
-				naGroup = len(groupOrder)
-				groupOrder = append(groupOrder, "<nil>")
-				groupCounts = append(groupCounts, 0)
-			}
-			groupID = naGroup
-		} else {
-			key, err := elem.Bool()
-			if err != nil {
-				if naGroup == -1 {
-					naGroup = len(groupOrder)
-					groupOrder = append(groupOrder, "<nil>")
-					groupCounts = append(groupCounts, 0)
-				}
-				groupID = naGroup
-			} else {
-				var ok bool
-				groupID, ok = groupIDs[key]
-				if !ok {
-					groupID = len(groupOrder)
-					groupIDs[key] = groupID
-					groupOrder = append(groupOrder, strconv.FormatBool(key))
-					groupCounts = append(groupCounts, 0)
-				}
-			}
-		}
-		groupCodes[row] = groupID
-		groupCounts[groupID]++
-	}
-	return groupOrder, groupCodes, buildGroupRowList(groupCodes, groupCounts)
-}
-
-func factorizeFloatGroups(col series.Series, nrows int) ([]string, []int, [][]int) {
-	groupIDs := make(map[float64]int)
-	groupOrder := make([]string, 0)
-	groupCodes := make([]int, nrows)
-	groupCounts := make([]int, 0)
-	naGroup := -1
-	for row := 0; row < nrows; row++ {
-		elem := col.Elem(row)
-		var groupID int
-		if elem.IsNA() {
-			if naGroup == -1 {
-				naGroup = len(groupOrder)
-				groupOrder = append(groupOrder, "<nil>")
-				groupCounts = append(groupCounts, 0)
-			}
-			groupID = naGroup
-		} else {
-			key := elem.Float()
-			var ok bool
-			groupID, ok = groupIDs[key]
-			if !ok {
-				groupID = len(groupOrder)
-				groupIDs[key] = groupID
-				groupOrder = append(groupOrder, strconv.FormatFloat(key, 'f', -1, 64))
-				groupCounts = append(groupCounts, 0)
-			}
-		}
-		groupCodes[row] = groupID
-		groupCounts[groupID]++
-	}
-	return groupOrder, groupCodes, buildGroupRowList(groupCodes, groupCounts)
+	return firstRows
 }
 
 func buildGroupKey(cols []series.Series, keyIdxs []int, row int) string {
@@ -753,22 +620,24 @@ const (
 
 // Groups : structure generated by groupby
 type Groups struct {
-	groups       map[string]DataFrame
-	colnames     []string
-	source       DataFrame
-	keyIdxs      []int
-	groupOrder   []string
-	groupCodes   []int
-	groupRowList [][]int
-	idxCol       string // hidden row-index column name (set by GroupBy)
-	nrows        int    // original DataFrame row count (for Transform)
-	aggregation  DataFrame
-	Err          error
+	groups         map[string]DataFrame
+	colnames       []string
+	source         DataFrame
+	keyIdxs        []int
+	groupOrder     []string
+	groupCodes     []int
+	groupCounts    []int
+	groupFirstRows []int
+	groupRowList   [][]int
+	idxCol         string // hidden row-index column name (set by GroupBy)
+	nrows          int    // original DataFrame row count (for Transform)
+	aggregation    DataFrame
+	Err            error
 }
 
 // Agg :Aggregate dataframe by aggregation type and aggregation column name
 func (gps Groups) Agg(typ AggregationType, colnames []string) DataFrame {
-	if gps.groups == nil && gps.groupRowList == nil {
+	if gps.groups == nil && gps.groupCodes == nil {
 		return DataFrame{Err: fmt.Errorf("Aggregation: input is nil")}
 	}
 	typs := []AggregationType{}
@@ -780,16 +649,16 @@ func (gps Groups) Agg(typ AggregationType, colnames []string) DataFrame {
 
 // Aggregation :Aggregate dataframe by aggregation type and aggregation column name
 func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFrame {
-	if gps.groupRowList == nil || gps.source.ncols == 0 {
+	if gps.groupCodes == nil || gps.source.ncols == 0 {
 		return gps.legacyAggregation(typs, colnames)
 	}
-	if gps.groupRowList == nil {
+	if gps.groupCodes == nil {
 		return DataFrame{Err: fmt.Errorf("Aggregation: input is nil")}
 	}
 	if len(typs) != len(colnames) {
 		return DataFrame{Err: fmt.Errorf("Aggregation: len(typs) != len(colnames)")}
 	}
-	if len(gps.groupRowList) == 0 {
+	if len(gps.groupOrder) == 0 {
 		return DataFrame{Err: fmt.Errorf("Aggregation: no groups")}
 	}
 
@@ -821,28 +690,50 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 	}
 
 	precomputed := make([][]float64, len(colnames))
+	needsRows := false
 	for i, srcIdx := range aggIdxs {
 		switch typs[i] {
 		case Aggregation_SUM:
 			precomputed[i] = gps.source.columns[srcIdx].SumByGroup(gps.groupCodes, nGroups)
 		case Aggregation_MEAN:
 			precomputed[i] = gps.source.columns[srcIdx].MeanByGroup(gps.groupCodes, nGroups)
+		case Aggregation_COUNT:
+			precomputed[i] = countsToFloat(gps.groupCounts)
+		case Aggregation_MAX:
+			if values, ok := gps.source.columns[srcIdx].MaxByGroup(gps.groupCodes, nGroups); ok {
+				precomputed[i] = values
+			} else {
+				needsRows = true
+			}
+		case Aggregation_MIN:
+			if values, ok := gps.source.columns[srcIdx].MinByGroup(gps.groupCodes, nGroups); ok {
+				precomputed[i] = values
+			} else {
+				needsRows = true
+			}
+		default:
+			needsRows = true
 		}
+	}
+	var groupRows [][]int
+	if needsRows {
+		groupRows = gps.ensureGroupRows()
 	}
 
 	for groupIdx := range gps.groupOrder {
-		rows := gps.groupRowList[groupIdx]
-		if len(rows) == 0 {
+		firstRow := gps.groupFirstRows[groupIdx]
+		if firstRow < 0 {
 			continue
 		}
 		for outIdx, srcIdx := range gps.keyIdxs {
-			columns[outIdx].Append(gps.source.columns[srcIdx].Elem(rows[0]))
+			columns[outIdx].Append(gps.source.columns[srcIdx].Elem(firstRow))
 		}
 		for i, srcIdx := range aggIdxs {
 			var value float64
 			if precomputed[i] != nil {
 				value = precomputed[i][groupIdx]
 			} else {
+				rows := groupRows[groupIdx]
 				value = aggregateColumnRows(gps.source.columns[srcIdx], rows, typs[i])
 			}
 			columns[len(gps.keyIdxs)+i].Append(value)
@@ -851,6 +742,14 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 
 	gps.aggregation = NewNoCopy(columns...)
 	return gps.aggregation
+}
+
+func countsToFloat(counts []int) []float64 {
+	out := make([]float64, len(counts))
+	for i, count := range counts {
+		out[i] = float64(count)
+	}
+	return out
 }
 
 func aggregateColumnRows(col series.Series, rows []int, typ AggregationType) float64 {
@@ -955,13 +854,13 @@ func (gps Groups) legacyAggregation(typs []AggregationType, colnames []string) D
 // AggregationParallel is like Aggregation but processes groups concurrently.
 // It is safe to use when the aggregation functions are pure (no shared state).
 func (gps Groups) AggregationParallel(typs []AggregationType, colnames []string) DataFrame {
-	if gps.groupRowList == nil || gps.source.ncols == 0 {
+	if gps.groupCodes == nil || gps.source.ncols == 0 {
 		return gps.Aggregation(typs, colnames)
 	}
 	if len(typs) != len(colnames) {
 		return DataFrame{Err: fmt.Errorf("AggregationParallel: len(typs) != len(colnames)")}
 	}
-	if len(gps.groupRowList) == 0 {
+	if len(gps.groupOrder) == 0 {
 		return DataFrame{Err: fmt.Errorf("AggregationParallel: no groups")}
 	}
 
@@ -984,6 +883,7 @@ func (gps Groups) AggregationParallel(typs []AggregationType, colnames []string)
 	for i := range values {
 		values[i] = make([]float64, nGroups)
 	}
+	groupRows := gps.ensureGroupRows()
 
 	sem := make(chan struct{}, numWorkers())
 	var wg sync.WaitGroup
@@ -993,7 +893,7 @@ func (gps Groups) AggregationParallel(typs []AggregationType, colnames []string)
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			rows := gps.groupRowList[groupIdx]
+			rows := groupRows[groupIdx]
 			for i, srcIdx := range aggIdxs {
 				values[i][groupIdx] = aggregateColumnRows(gps.source.columns[srcIdx], rows, typs[i])
 			}
@@ -1014,9 +914,12 @@ func (gps Groups) AggregationParallel(typs []AggregationType, colnames []string)
 	}
 
 	for groupIdx := range gps.groupOrder {
-		rows := gps.groupRowList[groupIdx]
+		firstRow := gps.groupFirstRows[groupIdx]
+		if firstRow < 0 {
+			continue
+		}
 		for outIdx, srcIdx := range gps.keyIdxs {
-			columns[outIdx].Append(gps.source.columns[srcIdx].Elem(rows[0]))
+			columns[outIdx].Append(gps.source.columns[srcIdx].Elem(firstRow))
 		}
 		for i := range colnames {
 			columns[len(gps.keyIdxs)+i].Append(values[i][groupIdx])
@@ -1047,14 +950,25 @@ func (g Groups) materializedGroups() map[string]DataFrame {
 	if g.groups != nil {
 		return g.groups
 	}
-	if g.groupRowList == nil {
+	groupRows := g.ensureGroupRows()
+	if groupRows == nil {
 		return nil
 	}
 	groups := make(map[string]DataFrame, len(g.groupOrder))
 	for i, key := range g.groupOrder {
-		groups[key] = g.source.Subset(g.groupRowList[i])
+		groups[key] = g.source.Subset(groupRows[i])
 	}
 	return groups
+}
+
+func (g Groups) ensureGroupRows() [][]int {
+	if g.groupRowList != nil {
+		return g.groupRowList
+	}
+	if g.groupCodes == nil || g.groupCounts == nil {
+		return nil
+	}
+	return buildGroupRowList(g.groupCodes, g.groupCounts)
 }
 
 // Apply applies a user-defined function to each group's DataFrame and returns
@@ -1097,7 +1011,7 @@ func (gps Groups) Transform(colname string, f func(series.Series) series.Series)
 		return series.Series{Err: gps.Err}, gps.Err
 	}
 
-	if gps.groupRowList != nil && gps.source.ncols > 0 {
+	if gps.groupCodes != nil && gps.source.ncols > 0 {
 		srcIdx := gps.source.ColIndex(colname)
 		if srcIdx < 0 {
 			err := fmt.Errorf("unknown column name")
@@ -1106,8 +1020,9 @@ func (gps Groups) Transform(colname string, f func(series.Series) series.Series)
 		values := make([]series.Element, gps.nrows)
 		outType := gps.source.columns[srcIdx].Type()
 		typeSet := false
+		groupRows := gps.ensureGroupRows()
 		for groupIdx, key := range gps.groupOrder {
-			rows := gps.groupRowList[groupIdx]
+			rows := groupRows[groupIdx]
 			col := gps.source.columns[srcIdx].Subset(rows)
 			transformed := f(col)
 			if transformed.Err != nil {

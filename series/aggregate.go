@@ -1,5 +1,7 @@
 package series
 
+import "math"
+
 // SumRows calculates the sum over selected row positions, skipping NaN values.
 func (s Series) SumRows(rows []int) float64 {
 	switch elems := s.elements.(type) {
@@ -164,6 +166,59 @@ func (s Series) MaxRows(rows []int) float64 {
 	}
 }
 
+// MaxByGroup calculates maximums for all group codes in one column scan.
+// It returns false for unsupported types.
+func (s Series) MaxByGroup(groupCodes []int, nGroups int) ([]float64, bool) {
+	out := make([]float64, nGroups)
+	seen := make([]bool, nGroups)
+	lockedNaN := make([]bool, nGroups)
+	switch elems := s.elements.(type) {
+	case floatElements:
+		for row, groupID := range groupCodes {
+			if lockedNaN[groupID] {
+				continue
+			}
+			elem := elems[row]
+			if !seen[groupID] {
+				seen[groupID] = true
+				if elem.IsNA() {
+					out[groupID] = math.NaN()
+					lockedNaN[groupID] = true
+				} else {
+					out[groupID] = elem.e
+				}
+				continue
+			}
+			if !elem.IsNA() && elem.e > out[groupID] {
+				out[groupID] = elem.e
+			}
+		}
+	case intElements:
+		for row, groupID := range groupCodes {
+			if lockedNaN[groupID] {
+				continue
+			}
+			elem := elems[row]
+			if !seen[groupID] {
+				seen[groupID] = true
+				if elem.IsNA() {
+					out[groupID] = math.NaN()
+					lockedNaN[groupID] = true
+				} else {
+					out[groupID] = float64(elem.e)
+				}
+				continue
+			}
+			if !elem.IsNA() && float64(elem.e) > out[groupID] {
+				out[groupID] = float64(elem.e)
+			}
+		}
+	default:
+		return nil, false
+	}
+	return out, true
+}
+
 // MinRows calculates the minimum over selected row positions.
 // It preserves the existing Min/Aggregation behavior where a leading NaN keeps
 // the result as NaN.
@@ -206,4 +261,57 @@ func (s Series) MinRows(rows []int) float64 {
 		}
 		return min.Float()
 	}
+}
+
+// MinByGroup calculates minimums for all group codes in one column scan.
+// It returns false for unsupported types.
+func (s Series) MinByGroup(groupCodes []int, nGroups int) ([]float64, bool) {
+	out := make([]float64, nGroups)
+	seen := make([]bool, nGroups)
+	lockedNaN := make([]bool, nGroups)
+	switch elems := s.elements.(type) {
+	case floatElements:
+		for row, groupID := range groupCodes {
+			if lockedNaN[groupID] {
+				continue
+			}
+			elem := elems[row]
+			if !seen[groupID] {
+				seen[groupID] = true
+				if elem.IsNA() {
+					out[groupID] = math.NaN()
+					lockedNaN[groupID] = true
+				} else {
+					out[groupID] = elem.e
+				}
+				continue
+			}
+			if !elem.IsNA() && elem.e < out[groupID] {
+				out[groupID] = elem.e
+			}
+		}
+	case intElements:
+		for row, groupID := range groupCodes {
+			if lockedNaN[groupID] {
+				continue
+			}
+			elem := elems[row]
+			if !seen[groupID] {
+				seen[groupID] = true
+				if elem.IsNA() {
+					out[groupID] = math.NaN()
+					lockedNaN[groupID] = true
+				} else {
+					out[groupID] = float64(elem.e)
+				}
+				continue
+			}
+			if !elem.IsNA() && float64(elem.e) < out[groupID] {
+				out[groupID] = float64(elem.e)
+			}
+		}
+	default:
+		return nil, false
+	}
+	return out, true
 }
