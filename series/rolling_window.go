@@ -2,6 +2,13 @@ package series
 
 import "math"
 
+func newFloatSeries(name string, capacity int) Series {
+	if capacity < 0 {
+		capacity = 0
+	}
+	return Series{Name: name, t: Float, elements: make(floatElements, 0, capacity)}
+}
+
 // EWM holds parameters for Exponentially Weighted calculations, mirroring
 // pandas ewm().  Exactly one of Alpha/Span/HalfLife/COM must be non-zero.
 type EWM struct {
@@ -35,7 +42,6 @@ func (e EWM) IgnoreNA(v bool) EWM { e.ignoreNA = v; return e }
 
 // Mean returns the exponentially weighted moving average (EWMA).
 func (e EWM) Mean() Series {
-	s := New([]float64{}, Float, "EWM_mean")
 	vals := make([]float64, e.series.Len())
 	for i := 0; i < e.series.Len(); i++ {
 		elem := e.series.Elem(i)
@@ -46,6 +52,7 @@ func (e EWM) Mean() Series {
 		}
 	}
 	n := len(vals)
+	s := newFloatSeries("EWM_mean", n)
 	alpha := e.alpha
 	result := make([]float64, n)
 
@@ -124,7 +131,6 @@ func (e EWM) Mean() Series {
 //
 // where weights w_j = (1-α)^(i-j) (adjusted mode).
 func (e EWM) Var() Series {
-	s := New([]float64{}, Float, "EWM_var")
 	vals := make([]float64, e.series.Len())
 	for i := 0; i < e.series.Len(); i++ {
 		elem := e.series.Elem(i)
@@ -136,6 +142,7 @@ func (e EWM) Var() Series {
 	}
 	alpha := e.alpha
 	n := len(vals)
+	s := newFloatSeries("EWM_var", n)
 
 	for i := 0; i < n; i++ {
 		// Accumulate weighted mean, sum-of-weights, sum-of-squared-weights,
@@ -179,7 +186,7 @@ func (e EWM) Var() Series {
 // Std returns the exponentially weighted standard deviation (sqrt of EWM Var).
 func (e EWM) Std() Series {
 	v := e.Var()
-	s := New([]float64{}, Float, "EWM_std")
+	s := newFloatSeries("EWM_std", v.Len())
 	for i := 0; i < v.Len(); i++ {
 		elem := v.Elem(i)
 		if elem.IsNA() {
@@ -233,7 +240,7 @@ func (r RollingWindow) floatSlice() []float64 {
 
 // nanResult returns a NaN float64 Series of length n with the given name.
 func nanResult(name string) Series {
-	return New([]float64{}, Float, name)
+	return newFloatSeries(name, 0)
 }
 
 // hasEnough returns true if the window [start,end) has at least minPeriods
@@ -250,9 +257,9 @@ func hasEnough(vals []float64, start, end, minPeriods int) bool {
 
 // Mean returns the rolling mean using an O(n) sliding-sum algorithm.
 func (r RollingWindow) Mean() Series {
-	s := New([]float64{}, Float, "Mean")
 	vals := r.floatSlice()
 	n := len(vals)
+	s := newFloatSeries("Mean", n)
 	w := r.window
 
 	var windowSum float64
@@ -284,9 +291,9 @@ func (r RollingWindow) Mean() Series {
 
 // Sum returns the rolling sum using an O(n) sliding algorithm.
 func (r RollingWindow) Sum() Series {
-	s := New([]float64{}, Float, "Sum")
 	vals := r.floatSlice()
 	n := len(vals)
+	s := newFloatSeries("Sum", n)
 	w := r.window
 
 	var windowSum float64
@@ -316,9 +323,9 @@ func (r RollingWindow) Sum() Series {
 // Min returns the rolling minimum.
 // Uses a deque-based O(n) monotonic queue algorithm.
 func (r RollingWindow) Min() Series {
-	s := New([]float64{}, Float, "Min")
 	vals := r.floatSlice()
 	n := len(vals)
+	s := newFloatSeries("Min", n)
 	w := r.window
 
 	// deque stores indices; front is always the index of the current window min.
@@ -357,9 +364,9 @@ func (r RollingWindow) Min() Series {
 // Max returns the rolling maximum.
 // Uses a deque-based O(n) monotonic queue algorithm.
 func (r RollingWindow) Max() Series {
-	s := New([]float64{}, Float, "Max")
 	vals := r.floatSlice()
 	n := len(vals)
+	s := newFloatSeries("Max", n)
 	w := r.window
 
 	deque := make([]int, 0, w)
@@ -395,9 +402,9 @@ func (r RollingWindow) Max() Series {
 // StdDev returns the rolling standard deviation (Bessel-corrected, ddof=1).
 // Uses Welford's online algorithm adapted for a sliding window: O(n).
 func (r RollingWindow) StdDev() Series {
-	s := New([]float64{}, Float, "StdDev")
 	vals := r.floatSlice()
 	n := len(vals)
+	s := newFloatSeries("StdDev", n)
 	w := r.window
 
 	// Welford's online algorithm for a sliding window.
@@ -451,9 +458,9 @@ func (r RollingWindow) StdDev() Series {
 // non-NaN float64 values in the current window.  It should return math.NaN()
 // when the window is insufficient.
 func (r RollingWindow) Apply(f func([]float64) float64) Series {
-	s := New([]float64{}, Float, "Apply")
 	vals := r.floatSlice()
 	n := len(vals)
+	s := newFloatSeries("Apply", n)
 	w := r.window
 
 	for i := 0; i < n; i++ {

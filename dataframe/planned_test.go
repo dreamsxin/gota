@@ -67,8 +67,8 @@ func TestGroupBy_TimeKey(t *testing.T) {
 	if g.Err != nil {
 		t.Fatalf("GroupBy Time key: unexpected error: %v", g.Err)
 	}
-	if len(g.groups) != 2 {
-		t.Errorf("GroupBy Time key: expected 2 groups, got %d", len(g.groups))
+	if len(g.GetGroups()) != 2 {
+		t.Errorf("GroupBy Time key: expected 2 groups, got %d", len(g.GetGroups()))
 	}
 }
 

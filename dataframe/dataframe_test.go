@@ -3102,7 +3102,7 @@ func TestDataFrame_GroupBy(t *testing.T) {
 	resultMap[fmt.Sprintf("%s_%d", "b", 1)] = 3 + 5.3
 	resultMap[fmt.Sprintf("%s_%d", "b", 2)] = 1.2
 
-	for k, values := range groups.groups {
+	for k, values := range groups.GetGroups() {
 		curV := 0.0
 		for _, vMap := range values.Maps() {
 			curV += vMap["values"].(float64)

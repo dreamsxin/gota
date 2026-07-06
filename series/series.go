@@ -174,24 +174,56 @@ func New(values interface{}, t Type, name string) Series {
 
 	switch v := values.(type) {
 	case []string:
+		if ret, ok := stringsToSeriesDirect(v, t, name); ok {
+			return ret
+		}
 		l := len(v)
 		preAlloc(l)
 		for i := 0; i < l; i++ {
 			ret.elements.Elem(i).Set(v[i])
 		}
 	case []float64:
+		if t == Float {
+			ret = FloatsDirect(v)
+			ret.Name = name
+			return ret
+		}
 		l := len(v)
 		preAlloc(l)
 		for i := 0; i < l; i++ {
 			ret.elements.Elem(i).Set(v[i])
 		}
 	case []int:
+		switch t {
+		case Int:
+			ret = IntsDirect(v)
+			ret.Name = name
+			return ret
+		case Float:
+			return BatchConvertInts(v, Float, name)
+		}
 		l := len(v)
 		preAlloc(l)
 		for i := 0; i < l; i++ {
 			ret.elements.Elem(i).Set(v[i])
 		}
 	case []bool:
+		if t == Bool {
+			ret = BoolsDirect(v)
+			ret.Name = name
+			return ret
+		}
+		l := len(v)
+		preAlloc(l)
+		for i := 0; i < l; i++ {
+			ret.elements.Elem(i).Set(v[i])
+		}
+	case []time.Time:
+		if t == Time {
+			ret = TimesDirect(v)
+			ret.Name = name
+			return ret
+		}
 		l := len(v)
 		preAlloc(l)
 		for i := 0; i < l; i++ {
@@ -251,7 +283,31 @@ func Times(values interface{}) Series {
 
 // Empty returns an empty Series of the same type
 func (s Series) Empty() Series {
-	return New([]int{}, s.t, s.Name)
+	return s.EmptyWithCapacity(0)
+}
+
+// EmptyWithCapacity returns an empty Series of the same type with enough
+// capacity for callers that know the result size up front.
+func (s Series) EmptyWithCapacity(capacity int) Series {
+	if capacity < 0 {
+		capacity = 0
+	}
+	ret := Series{Name: s.Name, t: s.t}
+	switch s.t {
+	case String:
+		ret.elements = make(stringElements, 0, capacity)
+	case Int:
+		ret.elements = make(intElements, 0, capacity)
+	case Float:
+		ret.elements = make(floatElements, 0, capacity)
+	case Bool:
+		ret.elements = make(boolElements, 0, capacity)
+	case Time:
+		ret.elements = make(timeElements, 0, capacity)
+	default:
+		panic(fmt.Sprintf("unknown type %v", s.t))
+	}
+	return ret
 }
 
 // Returns Error or nil if no error occured
@@ -286,6 +342,9 @@ func (s *Series) Append(values interface{}) {
 	if err := s.Err; err != nil {
 		return
 	}
+	if s.appendScalar(values) {
+		return
+	}
 	news := New(values, s.t, s.Name)
 	switch s.t {
 	case String:
@@ -299,6 +358,44 @@ func (s *Series) Append(values interface{}) {
 	case Time:
 		s.elements = append(s.elements.(timeElements), news.elements.(timeElements)...)
 	}
+}
+
+func (s *Series) appendScalar(value interface{}) bool {
+	if _, ok := value.(Series); ok {
+		return false
+	}
+	if value != nil {
+		switch reflect.TypeOf(value).Kind() {
+		case reflect.Slice:
+			return false
+		}
+	}
+
+	switch s.t {
+	case String:
+		var elem stringElement
+		elem.Set(value)
+		s.elements = append(s.elements.(stringElements), elem)
+	case Int:
+		var elem intElement
+		elem.Set(value)
+		s.elements = append(s.elements.(intElements), elem)
+	case Float:
+		var elem floatElement
+		elem.Set(value)
+		s.elements = append(s.elements.(floatElements), elem)
+	case Bool:
+		var elem boolElement
+		elem.Set(value)
+		s.elements = append(s.elements.(boolElements), elem)
+	case Time:
+		var elem timeElement
+		elem.Set(value)
+		s.elements = append(s.elements.(timeElements), elem)
+	default:
+		return false
+	}
+	return true
 }
 
 // Concat concatenates two series together. It will return a new Series with the
@@ -781,6 +878,12 @@ func parseIndexes(l int, indexes Indexes) ([]int, error) {
 	return idx, nil
 }
 
+// ParseIndexes normalizes any supported Series row indexer into integer row
+// positions. It performs the same validation as Subset and Set.
+func ParseIndexes(l int, indexes Indexes) ([]int, error) {
+	return parseIndexes(l, indexes)
+}
+
 // Order returns the indexes for sorting a Series. NaN elements are pushed to the
 // end by order of appearance.
 func (s Series) Order(reverse bool) []int {
@@ -1025,7 +1128,7 @@ func (s Series) NUnique() int {
 // CumSum returns a new Float Series containing the cumulative sum.
 // NaN values are propagated (a NaN in input produces NaN from that point).
 func (s Series) CumSum() Series {
-	result := New([]float64{}, Float, s.Name)
+	result := newFloatSeries(s.Name, s.Len())
 	var cum float64
 	hasNaN := false
 	for i := 0; i < s.Len(); i++ {
@@ -1043,7 +1146,7 @@ func (s Series) CumSum() Series {
 
 // CumProd returns a new Float Series containing the cumulative product.
 func (s Series) CumProd() Series {
-	result := New([]float64{}, Float, s.Name)
+	result := newFloatSeries(s.Name, s.Len())
 	cum := 1.0
 	hasNaN := false
 	for i := 0; i < s.Len(); i++ {
@@ -1061,7 +1164,7 @@ func (s Series) CumProd() Series {
 
 // CumMax returns a new Float Series containing the cumulative maximum.
 func (s Series) CumMax() Series {
-	result := New([]float64{}, Float, s.Name)
+	result := newFloatSeries(s.Name, s.Len())
 	curMax := math.NaN()
 	for i := 0; i < s.Len(); i++ {
 		elem := s.Elem(i)
@@ -1080,7 +1183,7 @@ func (s Series) CumMax() Series {
 
 // CumMin returns a new Float Series containing the cumulative minimum.
 func (s Series) CumMin() Series {
-	result := New([]float64{}, Float, s.Name)
+	result := newFloatSeries(s.Name, s.Len())
 	curMin := math.NaN()
 	for i := 0; i < s.Len(); i++ {
 		elem := s.Elem(i)
@@ -1101,8 +1204,8 @@ func (s Series) CumMin() Series {
 // periods can be negative for backward differences. Leading/trailing positions
 // without a valid predecessor/successor are NaN.
 func (s Series) Diff(periods int) Series {
-	result := New([]float64{}, Float, s.Name)
 	n := s.Len()
+	result := newFloatSeries(s.Name, n)
 	for i := 0; i < n; i++ {
 		j := i - periods
 		if j < 0 || j >= n {
@@ -1123,8 +1226,8 @@ func (s Series) Diff(periods int) Series {
 // PctChange returns element-wise percentage change: (s[i] - s[i-periods]) / abs(s[i-periods]).
 // Equivalent to pandas Series.pct_change().
 func (s Series) PctChange(periods int) Series {
-	result := New([]float64{}, Float, s.Name)
 	n := s.Len()
+	result := newFloatSeries(s.Name, n)
 	for i := 0; i < n; i++ {
 		j := i - periods
 		if j < 0 || j >= n {
@@ -1279,4 +1382,34 @@ func FloatsDirect(values []float64) Series {
 		elems[i] = floatElement{e: v, nan: v != v}
 	}
 	return Series{t: Float, elements: elems}
+}
+
+// IntsDirect constructs an Int Series without per-element interface dispatch.
+// The caller must not rely on mutations to values being reflected in the Series.
+func IntsDirect(values []int) Series {
+	elems := make(intElements, len(values))
+	for i, v := range values {
+		elems[i] = intElement{e: int64(v), nan: false}
+	}
+	return Series{t: Int, elements: elems}
+}
+
+// BoolsDirect constructs a Bool Series without per-element interface dispatch.
+// The caller must not rely on mutations to values being reflected in the Series.
+func BoolsDirect(values []bool) Series {
+	elems := make(boolElements, len(values))
+	for i, v := range values {
+		elems[i] = boolElement{e: v, nan: false}
+	}
+	return Series{t: Bool, elements: elems}
+}
+
+// TimesDirect constructs a Time Series without per-element interface dispatch.
+// The caller must not rely on mutations to values being reflected in the Series.
+func TimesDirect(values []time.Time) Series {
+	elems := make(timeElements, len(values))
+	for i, v := range values {
+		elems[i] = timeElement{e: v, nan: false}
+	}
+	return Series{t: Time, elements: elems}
 }

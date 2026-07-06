@@ -354,9 +354,13 @@ func (df DataFrame) Subset(indexes series.Indexes) DataFrame {
 	if df.Err != nil {
 		return df
 	}
+	idx, err := series.ParseIndexes(df.nrows, indexes)
+	if err != nil {
+		return DataFrame{Err: err}
+	}
 	columns := make([]series.Series, df.ncols)
 	for i, column := range df.columns {
-		s := column.Subset(indexes)
+		s := column.Subset(idx)
 		columns[i] = s
 	}
 	nrows, ncols, err := checkColumnsDimensions(columns...)
@@ -475,46 +479,262 @@ func (df DataFrame) GroupBy(colnames ...string) *Groups {
 	if len(colnames) <= 0 {
 		return nil
 	}
-	// Check that all colnames exist.
-	for _, c := range colnames {
-		if idx := findInStringSlice(c, df.Names()); idx == -1 {
+	names := df.Names()
+	keyIdxs := make([]int, len(colnames))
+	for i, c := range colnames {
+		idx := findInStringSlice(c, names)
+		if idx == -1 {
 			return &Groups{Err: fmt.Errorf("GroupBy: can't find column name: %s", c)}
 		}
+		keyIdxs[i] = idx
 	}
 
-	// Attach a hidden row-index column so Transform can restore original order.
-	const idxCol = "__groupby_row_idx__"
-	rowIdxs := make([]int, df.nrows)
-	for i := range rowIdxs {
-		rowIdxs[i] = i
+	groupOrder, groupCodes, groupRowList := df.factorizeGroups(keyIdxs)
+	return &Groups{
+		colnames:     colnames,
+		source:       df,
+		keyIdxs:      keyIdxs,
+		groupOrder:   groupOrder,
+		groupCodes:   groupCodes,
+		groupRowList: groupRowList,
+		nrows:        df.nrows,
 	}
-	dfWithIdx := df.Mutate(series.New(rowIdxs, series.Int, idxCol))
+}
 
-	groupDataFrame := make(map[string]DataFrame)
-	groupSeries := make(map[string][]map[string]interface{})
-
-	colTypes := map[string]series.Type{}
-	for _, c := range dfWithIdx.columns {
-		colTypes[c.Name] = c.Type()
+func (df DataFrame) factorizeGroups(keyIdxs []int) ([]string, []int, [][]int) {
+	if len(keyIdxs) != 1 {
+		return df.factorizeCompositeGroups(keyIdxs)
 	}
+	col := df.columns[keyIdxs[0]]
+	switch col.Type() {
+	case series.Int:
+		return factorizeIntGroups(col, df.nrows)
+	case series.Bool:
+		return factorizeBoolGroups(col, df.nrows)
+	case series.Float:
+		return factorizeFloatGroups(col, df.nrows)
+	case series.String:
+		return factorizeStringGroups(col, df.nrows)
+	default:
+		return df.factorizeCompositeGroups(keyIdxs)
+	}
+}
 
-	for _, s := range dfWithIdx.Maps() {
-		// Build a type-safe composite key compatible with the original format.
-		key := ""
-		for i, c := range colnames {
-			sep := ""
-			if i > 0 {
-				sep = "_"
-			}
-			key = fmt.Sprintf("%s%s%v", key, sep, s[c])
+func (df DataFrame) factorizeCompositeGroups(keyIdxs []int) ([]string, []int, [][]int) {
+	groupIDs := make(map[string]int)
+	groupOrder := make([]string, 0)
+	groupCodes := make([]int, df.nrows)
+	groupCounts := make([]int, 0)
+	for row := 0; row < df.nrows; row++ {
+		key := buildGroupKey(df.columns, keyIdxs, row)
+		groupID, ok := groupIDs[key]
+		if !ok {
+			groupID = len(groupOrder)
+			groupIDs[key] = groupID
+			groupOrder = append(groupOrder, key)
+			groupCounts = append(groupCounts, 0)
 		}
-		groupSeries[key] = append(groupSeries[key], s)
+		groupCodes[row] = groupID
+		groupCounts[groupID]++
 	}
+	return groupOrder, groupCodes, buildGroupRowList(groupCodes, groupCounts)
+}
 
-	for k, cMaps := range groupSeries {
-		groupDataFrame[k] = LoadMaps(cMaps, WithTypes(colTypes))
+func buildGroupRowList(groupCodes []int, groupCounts []int) [][]int {
+	groupRowList := make([][]int, len(groupCounts))
+	for i, count := range groupCounts {
+		groupRowList[i] = make([]int, count)
 	}
-	return &Groups{groups: groupDataFrame, colnames: colnames, idxCol: idxCol, nrows: df.nrows}
+	positions := make([]int, len(groupCounts))
+	for row, groupID := range groupCodes {
+		pos := positions[groupID]
+		groupRowList[groupID][pos] = row
+		positions[groupID] = pos + 1
+	}
+	return groupRowList
+}
+
+func factorizeStringGroups(col series.Series, nrows int) ([]string, []int, [][]int) {
+	groupIDs := make(map[string]int)
+	groupOrder := make([]string, 0)
+	groupCodes := make([]int, nrows)
+	groupCounts := make([]int, 0)
+	for row := 0; row < nrows; row++ {
+		elem := col.Elem(row)
+		key := "<nil>"
+		if !elem.IsNA() {
+			key = elem.String()
+		}
+		groupID, ok := groupIDs[key]
+		if !ok {
+			groupID = len(groupOrder)
+			groupIDs[key] = groupID
+			groupOrder = append(groupOrder, key)
+			groupCounts = append(groupCounts, 0)
+		}
+		groupCodes[row] = groupID
+		groupCounts[groupID]++
+	}
+	return groupOrder, groupCodes, buildGroupRowList(groupCodes, groupCounts)
+}
+
+func factorizeIntGroups(col series.Series, nrows int) ([]string, []int, [][]int) {
+	groupIDs := make(map[int64]int)
+	groupOrder := make([]string, 0)
+	groupCodes := make([]int, nrows)
+	groupCounts := make([]int, 0)
+	naGroup := -1
+	for row := 0; row < nrows; row++ {
+		elem := col.Elem(row)
+		var groupID int
+		if elem.IsNA() {
+			if naGroup == -1 {
+				naGroup = len(groupOrder)
+				groupOrder = append(groupOrder, "<nil>")
+				groupCounts = append(groupCounts, 0)
+			}
+			groupID = naGroup
+		} else {
+			key, err := elem.Int64()
+			if err != nil {
+				if naGroup == -1 {
+					naGroup = len(groupOrder)
+					groupOrder = append(groupOrder, "<nil>")
+					groupCounts = append(groupCounts, 0)
+				}
+				groupID = naGroup
+			} else {
+				var ok bool
+				groupID, ok = groupIDs[key]
+				if !ok {
+					groupID = len(groupOrder)
+					groupIDs[key] = groupID
+					groupOrder = append(groupOrder, strconv.FormatInt(key, 10))
+					groupCounts = append(groupCounts, 0)
+				}
+			}
+		}
+		groupCodes[row] = groupID
+		groupCounts[groupID]++
+	}
+	return groupOrder, groupCodes, buildGroupRowList(groupCodes, groupCounts)
+}
+
+func factorizeBoolGroups(col series.Series, nrows int) ([]string, []int, [][]int) {
+	groupIDs := make(map[bool]int, 2)
+	groupOrder := make([]string, 0, 3)
+	groupCodes := make([]int, nrows)
+	groupCounts := make([]int, 0, 3)
+	naGroup := -1
+	for row := 0; row < nrows; row++ {
+		elem := col.Elem(row)
+		var groupID int
+		if elem.IsNA() {
+			if naGroup == -1 {
+				naGroup = len(groupOrder)
+				groupOrder = append(groupOrder, "<nil>")
+				groupCounts = append(groupCounts, 0)
+			}
+			groupID = naGroup
+		} else {
+			key, err := elem.Bool()
+			if err != nil {
+				if naGroup == -1 {
+					naGroup = len(groupOrder)
+					groupOrder = append(groupOrder, "<nil>")
+					groupCounts = append(groupCounts, 0)
+				}
+				groupID = naGroup
+			} else {
+				var ok bool
+				groupID, ok = groupIDs[key]
+				if !ok {
+					groupID = len(groupOrder)
+					groupIDs[key] = groupID
+					groupOrder = append(groupOrder, strconv.FormatBool(key))
+					groupCounts = append(groupCounts, 0)
+				}
+			}
+		}
+		groupCodes[row] = groupID
+		groupCounts[groupID]++
+	}
+	return groupOrder, groupCodes, buildGroupRowList(groupCodes, groupCounts)
+}
+
+func factorizeFloatGroups(col series.Series, nrows int) ([]string, []int, [][]int) {
+	groupIDs := make(map[float64]int)
+	groupOrder := make([]string, 0)
+	groupCodes := make([]int, nrows)
+	groupCounts := make([]int, 0)
+	naGroup := -1
+	for row := 0; row < nrows; row++ {
+		elem := col.Elem(row)
+		var groupID int
+		if elem.IsNA() {
+			if naGroup == -1 {
+				naGroup = len(groupOrder)
+				groupOrder = append(groupOrder, "<nil>")
+				groupCounts = append(groupCounts, 0)
+			}
+			groupID = naGroup
+		} else {
+			key := elem.Float()
+			var ok bool
+			groupID, ok = groupIDs[key]
+			if !ok {
+				groupID = len(groupOrder)
+				groupIDs[key] = groupID
+				groupOrder = append(groupOrder, strconv.FormatFloat(key, 'f', -1, 64))
+				groupCounts = append(groupCounts, 0)
+			}
+		}
+		groupCodes[row] = groupID
+		groupCounts[groupID]++
+	}
+	return groupOrder, groupCodes, buildGroupRowList(groupCodes, groupCounts)
+}
+
+func buildGroupKey(cols []series.Series, keyIdxs []int, row int) string {
+	if len(keyIdxs) == 1 {
+		return groupKeyPart(cols[keyIdxs[0]].Elem(row))
+	}
+	var sb strings.Builder
+	for i, idx := range keyIdxs {
+		if i > 0 {
+			sb.WriteByte('_')
+		}
+		sb.WriteString(groupKeyPart(cols[idx].Elem(row)))
+	}
+	return sb.String()
+}
+
+func groupKeyPart(elem series.Element) string {
+	if elem.IsNA() {
+		return "<nil>"
+	}
+	switch elem.Type() {
+	case series.String:
+		return elem.String()
+	case series.Time:
+		return fmt.Sprint(elem.Val())
+	case series.Int:
+		v, err := elem.Int64()
+		if err != nil {
+			return "<nil>"
+		}
+		return strconv.FormatInt(v, 10)
+	case series.Float:
+		return strconv.FormatFloat(elem.Float(), 'f', -1, 64)
+	case series.Bool:
+		v, err := elem.Bool()
+		if err != nil {
+			return "<nil>"
+		}
+		return strconv.FormatBool(v)
+	default:
+		return fmt.Sprint(elem.Val())
+	}
 }
 
 // AggregationType Aggregation method type
@@ -533,17 +753,22 @@ const (
 
 // Groups : structure generated by groupby
 type Groups struct {
-	groups      map[string]DataFrame
-	colnames    []string
-	idxCol      string // hidden row-index column name (set by GroupBy)
-	nrows       int    // original DataFrame row count (for Transform)
-	aggregation DataFrame
-	Err         error
+	groups       map[string]DataFrame
+	colnames     []string
+	source       DataFrame
+	keyIdxs      []int
+	groupOrder   []string
+	groupCodes   []int
+	groupRowList [][]int
+	idxCol       string // hidden row-index column name (set by GroupBy)
+	nrows        int    // original DataFrame row count (for Transform)
+	aggregation  DataFrame
+	Err          error
 }
 
 // Agg :Aggregate dataframe by aggregation type and aggregation column name
 func (gps Groups) Agg(typ AggregationType, colnames []string) DataFrame {
-	if gps.groups == nil {
+	if gps.groups == nil && gps.groupRowList == nil {
 		return DataFrame{Err: fmt.Errorf("Aggregation: input is nil")}
 	}
 	typs := []AggregationType{}
@@ -555,6 +780,100 @@ func (gps Groups) Agg(typ AggregationType, colnames []string) DataFrame {
 
 // Aggregation :Aggregate dataframe by aggregation type and aggregation column name
 func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFrame {
+	if gps.groupRowList == nil || gps.source.ncols == 0 {
+		return gps.legacyAggregation(typs, colnames)
+	}
+	if gps.groupRowList == nil {
+		return DataFrame{Err: fmt.Errorf("Aggregation: input is nil")}
+	}
+	if len(typs) != len(colnames) {
+		return DataFrame{Err: fmt.Errorf("Aggregation: len(typs) != len(colnames)")}
+	}
+	if len(gps.groupRowList) == 0 {
+		return DataFrame{Err: fmt.Errorf("Aggregation: no groups")}
+	}
+
+	aggIdxs := make([]int, len(colnames))
+	for i, c := range colnames {
+		idx := gps.source.ColIndex(c)
+		if idx < 0 {
+			return DataFrame{Err: fmt.Errorf("Aggregation: can't find column name: %s", c)}
+		}
+		switch typs[i] {
+		case Aggregation_MAX, Aggregation_MEAN, Aggregation_MEDIAN, Aggregation_MIN, Aggregation_STD, Aggregation_SUM, Aggregation_COUNT:
+		default:
+			return DataFrame{Err: fmt.Errorf("Aggregation: method %s not found", typs[i])}
+		}
+		aggIdxs[i] = idx
+	}
+
+	nGroups := len(gps.groupOrder)
+	columns := make([]series.Series, 0, len(gps.keyIdxs)+len(colnames))
+	for _, idx := range gps.keyIdxs {
+		col := gps.source.columns[idx].EmptyWithCapacity(nGroups)
+		col.Name = gps.source.columns[idx].Name
+		columns = append(columns, col)
+	}
+	for i, c := range colnames {
+		col := series.New([]float64{}, series.Float, buildAggregatedColname(c, typs[i])).EmptyWithCapacity(nGroups)
+		col.Name = buildAggregatedColname(c, typs[i])
+		columns = append(columns, col)
+	}
+
+	for groupIdx := range gps.groupOrder {
+		rows := gps.groupRowList[groupIdx]
+		if len(rows) == 0 {
+			continue
+		}
+		for outIdx, srcIdx := range gps.keyIdxs {
+			columns[outIdx].Append(gps.source.columns[srcIdx].Elem(rows[0]))
+		}
+		for i, srcIdx := range aggIdxs {
+			value := aggregateColumnRows(gps.source.columns[srcIdx], rows, typs[i])
+			columns[len(gps.keyIdxs)+i].Append(value)
+		}
+	}
+
+	gps.aggregation = NewNoCopy(columns...)
+	return gps.aggregation
+}
+
+func aggregateColumnRows(col series.Series, rows []int, typ AggregationType) float64 {
+	switch typ {
+	case Aggregation_MAX:
+		max := col.Elem(rows[0])
+		for _, row := range rows[1:] {
+			elem := col.Elem(row)
+			if elem.Greater(max) {
+				max = elem
+			}
+		}
+		return max.Float()
+	case Aggregation_MIN:
+		min := col.Elem(rows[0])
+		for _, row := range rows[1:] {
+			elem := col.Elem(row)
+			if elem.Less(min) {
+				min = elem
+			}
+		}
+		return min.Float()
+	case Aggregation_MEAN:
+		return col.MeanRows(rows)
+	case Aggregation_SUM:
+		return col.SumRows(rows)
+	case Aggregation_COUNT:
+		return float64(len(rows))
+	case Aggregation_MEDIAN:
+		return col.Subset(rows).Median()
+	case Aggregation_STD:
+		return col.Subset(rows).StdDev()
+	default:
+		return 0
+	}
+}
+
+func (gps Groups) legacyAggregation(typs []AggregationType, colnames []string) DataFrame {
 	if gps.groups == nil {
 		return DataFrame{Err: fmt.Errorf("Aggregation: input is nil")}
 	}
@@ -635,115 +954,85 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 // AggregationParallel is like Aggregation but processes groups concurrently.
 // It is safe to use when the aggregation functions are pure (no shared state).
 func (gps Groups) AggregationParallel(typs []AggregationType, colnames []string) DataFrame {
-	if gps.groups == nil {
-		return DataFrame{Err: fmt.Errorf("AggregationParallel: input is nil")}
+	if gps.groupRowList == nil || gps.source.ncols == 0 {
+		return gps.Aggregation(typs, colnames)
 	}
 	if len(typs) != len(colnames) {
 		return DataFrame{Err: fmt.Errorf("AggregationParallel: len(typs) != len(colnames)")}
 	}
-	if len(gps.groups) == 0 {
+	if len(gps.groupRowList) == 0 {
 		return DataFrame{Err: fmt.Errorf("AggregationParallel: no groups")}
 	}
 
-	type result struct {
-		m   map[string]interface{}
-		err error
+	aggIdxs := make([]int, len(colnames))
+	for i, c := range colnames {
+		idx := gps.source.ColIndex(c)
+		if idx < 0 {
+			return DataFrame{Err: fmt.Errorf("AggregationParallel: can't find column name: %s", c)}
+		}
+		switch typs[i] {
+		case Aggregation_MAX, Aggregation_MEAN, Aggregation_MEDIAN, Aggregation_MIN, Aggregation_STD, Aggregation_SUM, Aggregation_COUNT:
+		default:
+			return DataFrame{Err: fmt.Errorf("AggregationParallel: method %s not found", typs[i])}
+		}
+		aggIdxs[i] = idx
 	}
 
-	ch := make(chan result, len(gps.groups))
+	nGroups := len(gps.groupOrder)
+	values := make([][]float64, len(colnames))
+	for i := range values {
+		values[i] = make([]float64, nGroups)
+	}
+
 	sem := make(chan struct{}, numWorkers())
 	var wg sync.WaitGroup
-
-	for _, df := range gps.groups {
+	for groupIdx := range gps.groupOrder {
 		wg.Add(1)
-		go func(df DataFrame) {
+		go func(groupIdx int) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			rows := gps.groupRowList[groupIdx]
+			for i, srcIdx := range aggIdxs {
+				values[i][groupIdx] = aggregateColumnRows(gps.source.columns[srcIdx], rows, typs[i])
+			}
+		}(groupIdx)
+	}
+	wg.Wait()
 
-			rows := df.Maps()
-			if len(rows) == 0 {
-				ch <- result{}
-				return
-			}
-			targetMap := rows[0]
-			curMap := make(map[string]interface{})
-			for _, c := range gps.colnames {
-				if value, ok := targetMap[c]; ok {
-					curMap[c] = value
-				} else {
-					ch <- result{err: fmt.Errorf("AggregationParallel: can't find column %s", c)}
-					return
-				}
-			}
-			for i, c := range colnames {
-				curSeries := df.Col(c)
-				if curSeries.Err != nil {
-					curMap[buildAggregatedColname(c, typs[i])] = nil
-					continue
-				}
-				var value float64
-				switch typs[i] {
-				case Aggregation_MAX:
-					value = curSeries.Max()
-				case Aggregation_MEAN:
-					value = curSeries.Mean()
-				case Aggregation_MEDIAN:
-					value = curSeries.Median()
-				case Aggregation_MIN:
-					value = curSeries.Min()
-				case Aggregation_STD:
-					value = curSeries.StdDev()
-				case Aggregation_SUM:
-					value = curSeries.Sum()
-				case Aggregation_COUNT:
-					value = float64(curSeries.Len())
-				default:
-					ch <- result{err: fmt.Errorf("AggregationParallel: method %s not found", typs[i])}
-					return
-				}
-				curMap[buildAggregatedColname(c, typs[i])] = value
-			}
-			ch <- result{m: curMap}
-		}(df)
+	columns := make([]series.Series, 0, len(gps.keyIdxs)+len(colnames))
+	for _, idx := range gps.keyIdxs {
+		col := gps.source.columns[idx].EmptyWithCapacity(nGroups)
+		col.Name = gps.source.columns[idx].Name
+		columns = append(columns, col)
 	}
-	go func() { wg.Wait(); close(ch) }()
+	for i, c := range colnames {
+		col := series.New([]float64{}, series.Float, buildAggregatedColname(c, typs[i])).EmptyWithCapacity(nGroups)
+		col.Name = buildAggregatedColname(c, typs[i])
+		columns = append(columns, col)
+	}
 
-	var dfMaps []map[string]interface{}
-	for r := range ch {
-		if r.err != nil {
-			return DataFrame{Err: r.err}
+	for groupIdx := range gps.groupOrder {
+		rows := gps.groupRowList[groupIdx]
+		for outIdx, srcIdx := range gps.keyIdxs {
+			columns[outIdx].Append(gps.source.columns[srcIdx].Elem(rows[0]))
 		}
-		if r.m != nil {
-			dfMaps = append(dfMaps, r.m)
-		}
-	}
-	if len(dfMaps) == 0 {
-		return DataFrame{Err: fmt.Errorf("AggregationParallel: no data")}
-	}
-	colTypes := map[string]series.Type{}
-	for k, v := range dfMaps[0] {
-		switch v.(type) {
-		case string:
-			colTypes[k] = series.String
-		case int, int16, int32, int64:
-			colTypes[k] = series.Int
-		case float32, float64:
-			colTypes[k] = series.Float
+		for i := range colnames {
+			columns[len(gps.keyIdxs)+i].Append(values[i][groupIdx])
 		}
 	}
-	return LoadMaps(dfMaps, WithTypes(colTypes))
+	return NewNoCopy(columns...)
 }
 
 // GetGroups returns the grouped DataFrames created by GroupBy.
 // The hidden row-index column is stripped from each group before returning.
 func (g Groups) GetGroups() map[string]DataFrame {
+	groups := g.materializedGroups()
 	if g.idxCol == "" {
-		return g.groups
+		return groups
 	}
-	// Strip the hidden index column from each group.
-	clean := make(map[string]DataFrame, len(g.groups))
-	for k, df := range g.groups {
+	clean := make(map[string]DataFrame, len(groups))
+	for k, df := range groups {
 		if df.ColIndex(g.idxCol) >= 0 {
 			clean[k] = df.Drop(g.idxCol)
 		} else {
@@ -751,6 +1040,20 @@ func (g Groups) GetGroups() map[string]DataFrame {
 		}
 	}
 	return clean
+}
+
+func (g Groups) materializedGroups() map[string]DataFrame {
+	if g.groups != nil {
+		return g.groups
+	}
+	if g.groupRowList == nil {
+		return nil
+	}
+	groups := make(map[string]DataFrame, len(g.groupOrder))
+	for i, key := range g.groupOrder {
+		groups[key] = g.source.Subset(g.groupRowList[i])
+	}
+	return groups
 }
 
 // Apply applies a user-defined function to each group's DataFrame and returns
@@ -761,7 +1064,7 @@ func (gps Groups) Apply(f func(DataFrame) DataFrame) DataFrame {
 		return DataFrame{Err: gps.Err}
 	}
 	var results []DataFrame
-	for _, df := range gps.groups {
+	for _, df := range gps.materializedGroups() {
 		// Strip hidden index column before passing to user function.
 		if gps.idxCol != "" && df.ColIndex(gps.idxCol) >= 0 {
 			df = df.Drop(gps.idxCol)
@@ -793,44 +1096,37 @@ func (gps Groups) Transform(colname string, f func(series.Series) series.Series)
 		return series.Series{Err: gps.Err}, gps.Err
 	}
 
-	// If we have the hidden index column, restore original row order.
-	if gps.idxCol != "" && gps.nrows > 0 {
-		type indexedVal struct {
-			idx int
-			val series.Element
+	if gps.groupRowList != nil && gps.source.ncols > 0 {
+		srcIdx := gps.source.ColIndex(colname)
+		if srcIdx < 0 {
+			err := fmt.Errorf("unknown column name")
+			return series.Series{Err: err}, err
 		}
-		all := make([]indexedVal, 0, gps.nrows)
-
-		for _, df := range gps.groups {
-			col := df.Col(colname)
-			if col.Err != nil {
-				return series.Series{Err: col.Err}, col.Err
-			}
+		values := make([]series.Element, gps.nrows)
+		outType := gps.source.columns[srcIdx].Type()
+		typeSet := false
+		for groupIdx, key := range gps.groupOrder {
+			rows := gps.groupRowList[groupIdx]
+			col := gps.source.columns[srcIdx].Subset(rows)
 			transformed := f(col)
 			if transformed.Err != nil {
 				return series.Series{Err: transformed.Err}, transformed.Err
 			}
-			idxSeries := df.Col(gps.idxCol)
-			for i := 0; i < transformed.Len(); i++ {
-				origIdx, err := idxSeries.Elem(i).Int()
-				if err != nil {
-					return series.Series{}, fmt.Errorf("Transform: row index error: %v", err)
-				}
-				all = append(all, indexedVal{idx: origIdx, val: transformed.Elem(i)})
+			if transformed.Len() != len(rows) {
+				err := fmt.Errorf("Transform: result length mismatch for group %s", key)
+				return series.Series{Err: err}, err
+			}
+			if transformed.Len() > 0 && !typeSet {
+				outType = transformed.Elem(0).Type()
+				typeSet = true
+			}
+			for i, row := range rows {
+				values[row] = transformed.Elem(i)
 			}
 		}
-
-		// Sort by original row index.
-		sort.Slice(all, func(i, j int) bool { return all[i].idx < all[j].idx })
-
-		// Determine output type from first non-nil element.
-		outType := series.Float
-		if len(all) > 0 {
-			outType = all[0].val.Type()
-		}
-		out := series.New([]float64{}, outType, colname)
-		for _, iv := range all {
-			out.Append(iv.val)
+		out := series.New(nil, outType, colname).EmptyWithCapacity(gps.nrows)
+		for _, val := range values {
+			out.Append(val)
 		}
 		out.Name = colname
 		return out, nil
@@ -838,7 +1134,7 @@ func (gps Groups) Transform(colname string, f func(series.Series) series.Series)
 
 	// Fallback (no index info): concat in map iteration order.
 	var segs []series.Series
-	for _, df := range gps.groups {
+	for _, df := range gps.materializedGroups() {
 		col := df.Col(colname)
 		if col.Err != nil {
 			return series.Series{Err: col.Err}, col.Err
@@ -1252,7 +1548,7 @@ func (df DataFrame) Rapply(f func(series.Series) series.Series) DataFrame {
 	elements := make([][]series.Element, df.nrows)
 	rowlen := -1
 	for i := 0; i < df.nrows; i++ {
-		row := series.New(nil, rowType, "").Empty()
+		row := series.New(nil, rowType, "").EmptyWithCapacity(df.ncols)
 		for _, col := range df.columns {
 			row.Append(col.Elem(i))
 		}
@@ -1281,7 +1577,7 @@ func (df DataFrame) Rapply(f func(series.Series) series.Series) DataFrame {
 			types[i] = elements[i][j].Type()
 		}
 		colType := detectType(types)
-		s := series.New(nil, colType, "").Empty()
+		s := series.New(nil, colType, "").EmptyWithCapacity(df.nrows)
 		for i := 0; i < df.nrows; i++ {
 			s.Append(elements[i][j])
 		}
@@ -1346,7 +1642,7 @@ func (df DataFrame) RapplyParallel(f func(series.Series) series.Series) DataFram
 	// Pool of empty Series to reduce per-goroutine allocations.
 	rowPool := &sync.Pool{
 		New: func() interface{} {
-			s := series.New(nil, rowType, "").Empty()
+			s := series.New(nil, rowType, "").EmptyWithCapacity(df.ncols)
 			return &s
 		},
 	}
@@ -1372,7 +1668,7 @@ func (df DataFrame) RapplyParallel(f func(series.Series) series.Series) DataFram
 			rowPtr := rowPool.Get().(*series.Series)
 			row := *rowPtr
 			// Reset to empty before reuse.
-			row = row.Empty()
+			row = row.EmptyWithCapacity(df.ncols)
 			for _, col := range df.columns {
 				row.Append(col.Elem(rowIdx))
 			}
@@ -1387,7 +1683,7 @@ func (df DataFrame) RapplyParallel(f func(series.Series) series.Series) DataFram
 				elems[j] = row.Elem(j)
 			}
 			// Return a fresh empty series to the pool.
-			empty := row.Empty()
+			empty := row.EmptyWithCapacity(df.ncols)
 			*rowPtr = empty
 			rowPool.Put(rowPtr)
 			ch <- rowResult{idx: rowIdx, elems: elems}
@@ -1419,7 +1715,7 @@ func (df DataFrame) RapplyParallel(f func(series.Series) series.Series) DataFram
 			colTypes[i] = elements[i][j].Type()
 		}
 		colType := detectType(colTypes)
-		s := series.New(nil, colType, "").Empty()
+		s := series.New(nil, colType, "").EmptyWithCapacity(df.nrows)
 		for i := 0; i < df.nrows; i++ {
 			s.Append(elements[i][j])
 		}
@@ -1761,13 +2057,17 @@ func LoadRecords(records [][]string, options ...LoadOption) DataFrame {
 	numRows := len(records)
 	types := make([]series.Type, numCols)
 	rawcols := make([][]string, numCols)
+	nanValues := make(map[string]struct{}, len(cfg.nanValues))
+	for _, v := range cfg.nanValues {
+		nanValues[v] = struct{}{}
+	}
 
 	// Pre-allocate column data with exact capacity
 	for i, colname := range headers {
 		rawcol := make([]string, numRows)
 		for j := 0; j < numRows; j++ {
 			val := records[j][i]
-			if findInStringSlice(val, cfg.nanValues) != -1 {
+			if _, ok := nanValues[val]; ok {
 				val = "NaN"
 			}
 			rawcol[j] = val
@@ -2531,7 +2831,7 @@ func (df DataFrame) Shift(periods int, subset ...string) DataFrame {
 		if !applies(col.Name) {
 			continue
 		}
-		shifted := col.Empty()
+		shifted := col.EmptyWithCapacity(n)
 		if periods > 0 {
 			// Shift down: prepend `periods` NaNs, drop last `periods` elements.
 			for i := 0; i < periods && i < n; i++ {
@@ -2889,11 +3189,12 @@ func (df DataFrame) CrossJoin(b DataFrame) DataFrame {
 	bCols := b.columns
 	// Initialize newCols
 	var newCols []series.Series
+	capacity := df.nrows * b.nrows
 	for i := 0; i < df.ncols; i++ {
-		newCols = append(newCols, aCols[i].Empty())
+		newCols = append(newCols, aCols[i].EmptyWithCapacity(capacity))
 	}
 	for i := 0; i < b.ncols; i++ {
-		newCols = append(newCols, bCols[i].Empty())
+		newCols = append(newCols, bCols[i].EmptyWithCapacity(capacity))
 	}
 	// Fill newCols
 	for i := 0; i < df.nrows; i++ {
@@ -3234,7 +3535,7 @@ func (df DataFrame) Pivot(rows []string, columns []string, values []PivotValue) 
 	if len(rows) == 0 {
 		rowGroups = map[string]DataFrame{"": aggregatedDF}
 	} else {
-		rowGroups = aggregatedDF.GroupBy(rows...).groups
+		rowGroups = aggregatedDF.GroupBy(rows...).GetGroups()
 	}
 	rowGroupsKeys := make([]string, 0, len(rowGroups))
 	for key := range rowGroups {
@@ -3381,7 +3682,7 @@ func (df DataFrame) buildGeneratedCols(aggregatedDF DataFrame, columns []string,
 		return generatedColnames, generatedColtyps
 	}
 
-	columnGroups := aggregatedDF.GroupBy(columns...).groups
+	columnGroups := aggregatedDF.GroupBy(columns...).GetGroups()
 	generatedColElemsList := make([][]series.Element, 0, len(columnGroups))
 	for _, columnGroupDf := range columnGroups {
 		columnStrValues := make([]string, 0, len(columns))

@@ -265,3 +265,62 @@ func BenchmarkDataFrame_Elem(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkDataFrame_GroupByAggregation(b *testing.B) {
+	n := 100000
+	keys := make([]string, n)
+	values := make([]float64, n)
+	for i := 0; i < n; i++ {
+		keys[i] = "k" + strconv.Itoa(i%100)
+		values[i] = float64(i % 1000)
+	}
+	df := dataframe.New(
+		series.New(keys, series.String, "key"),
+		series.New(values, series.Float, "value"),
+	)
+
+	b.Run("GroupByOnly", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			df.GroupBy("key")
+		}
+	})
+	b.Run("GroupBySum", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			groups := df.GroupBy("key")
+			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_SUM}, []string{"value"})
+		}
+	})
+	b.Run("AggregationOnly", func(b *testing.B) {
+		groups := df.GroupBy("key")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_SUM}, []string{"value"})
+		}
+	})
+}
+
+func BenchmarkDataFrame_GroupByAggregationIntKey(b *testing.B) {
+	n := 100000
+	keys := make([]int, n)
+	values := make([]float64, n)
+	for i := 0; i < n; i++ {
+		keys[i] = i % 100
+		values[i] = float64(i % 1000)
+	}
+	df := dataframe.New(
+		series.New(keys, series.Int, "key"),
+		series.New(values, series.Float, "value"),
+	)
+
+	b.Run("GroupByOnly", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			df.GroupBy("key")
+		}
+	})
+	b.Run("GroupBySum", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			groups := df.GroupBy("key")
+			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_SUM}, []string{"value"})
+		}
+	})
+}
