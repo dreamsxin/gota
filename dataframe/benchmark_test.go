@@ -310,6 +310,34 @@ func BenchmarkDataFrame_GroupByAggregation(b *testing.B) {
 			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_MAX}, []string{"value"})
 		}
 	})
+	b.Run("AggregationOnlyManySameColumn", func(b *testing.B) {
+		groups := df.GroupBy("key")
+		typs := []dataframe.AggregationType{
+			dataframe.Aggregation_SUM,
+			dataframe.Aggregation_MEAN,
+			dataframe.Aggregation_MAX,
+			dataframe.Aggregation_MIN,
+			dataframe.Aggregation_COUNT,
+		}
+		cols := []string{"value", "value", "value", "value", "value"}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			groups.Aggregation(typs, cols)
+		}
+	})
+	b.Run("AggregationOnlySameColumnSumMeanCount", func(b *testing.B) {
+		groups := df.GroupBy("key")
+		typs := []dataframe.AggregationType{
+			dataframe.Aggregation_SUM,
+			dataframe.Aggregation_MEAN,
+			dataframe.Aggregation_COUNT,
+		}
+		cols := []string{"value", "value", "value"}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			groups.Aggregation(typs, cols)
+		}
+	})
 }
 
 func BenchmarkDataFrame_GroupByAggregationIntKey(b *testing.B) {
@@ -333,6 +361,35 @@ func BenchmarkDataFrame_GroupByAggregationIntKey(b *testing.B) {
 	b.Run("GroupBySum", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			groups := df.GroupBy("key")
+			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_SUM}, []string{"value"})
+		}
+	})
+}
+
+func BenchmarkDataFrame_GroupByAggregationTwoKeys(b *testing.B) {
+	n := 100000
+	keyA := make([]string, n)
+	keyB := make([]int, n)
+	values := make([]float64, n)
+	for i := 0; i < n; i++ {
+		keyA[i] = "k" + strconv.Itoa(i%100)
+		keyB[i] = i % 10
+		values[i] = float64(i % 1000)
+	}
+	df := dataframe.New(
+		series.New(keyA, series.String, "key_a"),
+		series.New(keyB, series.Int, "key_b"),
+		series.New(values, series.Float, "value"),
+	)
+
+	b.Run("GroupByOnly", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			df.GroupBy("key_a", "key_b")
+		}
+	})
+	b.Run("GroupBySum", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			groups := df.GroupBy("key_a", "key_b")
 			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_SUM}, []string{"value"})
 		}
 	})

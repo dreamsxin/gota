@@ -504,6 +504,17 @@ func (df DataFrame) GroupBy(colnames ...string) *Groups {
 }
 
 func (df DataFrame) factorizeGroups(keyIdxs []int) ([]string, []int, []int) {
+	if len(keyIdxs) == 2 {
+		labels, codes, counts, ok := series.FactorizePair(df.columns[keyIdxs[0]], df.columns[keyIdxs[1]])
+		if ok {
+			return labels, codes, counts
+		}
+		leftLabels, leftCodes, _, leftOK := df.columns[keyIdxs[0]].Factorize()
+		rightLabels, rightCodes, _, rightOK := df.columns[keyIdxs[1]].Factorize()
+		if leftOK && rightOK {
+			return df.factorizeTwoCodeGroups(keyIdxs, leftLabels, leftCodes, rightLabels, rightCodes)
+		}
+	}
 	if len(keyIdxs) != 1 {
 		return df.factorizeCompositeGroups(keyIdxs)
 	}
@@ -513,6 +524,30 @@ func (df DataFrame) factorizeGroups(keyIdxs []int) ([]string, []int, []int) {
 		return df.factorizeCompositeGroups(keyIdxs)
 	}
 	return labels, codes, counts
+}
+
+func (df DataFrame) factorizeTwoCodeGroups(keyIdxs []int, leftLabels []string, leftCodes []int, rightLabels []string, rightCodes []int) ([]string, []int, []int) {
+	type codePair struct {
+		left  int
+		right int
+	}
+	groupIDs := make(map[codePair]int)
+	groupOrder := make([]string, 0)
+	groupCodes := make([]int, df.nrows)
+	groupCounts := make([]int, 0)
+	for row := 0; row < df.nrows; row++ {
+		pair := codePair{left: leftCodes[row], right: rightCodes[row]}
+		groupID, ok := groupIDs[pair]
+		if !ok {
+			groupID = len(groupOrder)
+			groupIDs[pair] = groupID
+			groupOrder = append(groupOrder, leftLabels[pair.left]+"_"+rightLabels[pair.right])
+			groupCounts = append(groupCounts, 0)
+		}
+		groupCodes[row] = groupID
+		groupCounts[groupID]++
+	}
+	return groupOrder, groupCodes, groupCounts
 }
 
 func (df DataFrame) factorizeCompositeGroups(keyIdxs []int) ([]string, []int, []int) {
@@ -679,19 +714,20 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 	nGroups := len(gps.groupOrder)
 	columns := make([]series.Series, 0, len(gps.keyIdxs)+len(colnames))
 	for _, idx := range gps.keyIdxs {
-		col := gps.source.columns[idx].EmptyWithCapacity(nGroups)
+		col := gps.source.columns[idx].Subset(gps.groupFirstRows)
 		col.Name = gps.source.columns[idx].Name
-		columns = append(columns, col)
-	}
-	for i, c := range colnames {
-		col := series.New([]float64{}, series.Float, buildAggregatedColname(c, typs[i])).EmptyWithCapacity(nGroups)
-		col.Name = buildAggregatedColname(c, typs[i])
 		columns = append(columns, col)
 	}
 
 	precomputed := make([][]float64, len(colnames))
+	if hasRepeatedGroupedAggregation(aggIdxs, typs) {
+		precomputeGroupedAggregations(gps.source.columns, aggIdxs, typs, gps.groupCodes, nGroups, gps.groupCounts, precomputed)
+	}
 	needsRows := false
 	for i, srcIdx := range aggIdxs {
+		if precomputed[i] != nil {
+			continue
+		}
 		switch typs[i] {
 		case Aggregation_SUM:
 			precomputed[i] = gps.source.columns[srcIdx].SumByGroup(gps.groupCodes, nGroups)
@@ -720,28 +756,116 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 		groupRows = gps.ensureGroupRows()
 	}
 
-	for groupIdx := range gps.groupOrder {
-		firstRow := gps.groupFirstRows[groupIdx]
-		if firstRow < 0 {
+	aggColumns := make([]series.Series, len(colnames))
+	for i, c := range colnames {
+		name := buildAggregatedColname(c, typs[i])
+		if precomputed[i] != nil {
+			col := series.FloatsDirect(precomputed[i])
+			col.Name = name
+			aggColumns[i] = col
 			continue
 		}
-		for outIdx, srcIdx := range gps.keyIdxs {
-			columns[outIdx].Append(gps.source.columns[srcIdx].Elem(firstRow))
-		}
+		col := series.New([]float64{}, series.Float, name).EmptyWithCapacity(nGroups)
+		col.Name = name
+		aggColumns[i] = col
+	}
+	columns = append(columns, aggColumns...)
+
+	for groupIdx := range gps.groupOrder {
 		for i, srcIdx := range aggIdxs {
-			var value float64
 			if precomputed[i] != nil {
-				value = precomputed[i][groupIdx]
-			} else {
-				rows := groupRows[groupIdx]
-				value = aggregateColumnRows(gps.source.columns[srcIdx], rows, typs[i])
+				continue
 			}
+			rows := groupRows[groupIdx]
+			value := aggregateColumnRows(gps.source.columns[srcIdx], rows, typs[i])
 			columns[len(gps.keyIdxs)+i].Append(value)
 		}
 	}
 
 	gps.aggregation = NewNoCopy(columns...)
 	return gps.aggregation
+}
+
+func hasRepeatedGroupedAggregation(aggIdxs []int, typs []AggregationType) bool {
+	for i, srcIdx := range aggIdxs {
+		switch typs[i] {
+		case Aggregation_SUM, Aggregation_MEAN, Aggregation_MAX, Aggregation_MIN, Aggregation_COUNT:
+		default:
+			continue
+		}
+		for j := 0; j < i; j++ {
+			switch typs[j] {
+			case Aggregation_SUM, Aggregation_MEAN, Aggregation_MAX, Aggregation_MIN, Aggregation_COUNT:
+				if aggIdxs[j] == srcIdx {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func precomputeGroupedAggregations(cols []series.Series, aggIdxs []int, typs []AggregationType, groupCodes []int, nGroups int, groupCounts []int, out [][]float64) {
+	type needs struct {
+		sum, mean, max, min, count bool
+		indexes                    []int
+	}
+	byCol := make(map[int]*needs)
+	for i, srcIdx := range aggIdxs {
+		switch typs[i] {
+		case Aggregation_SUM, Aggregation_MEAN, Aggregation_MAX, Aggregation_MIN, Aggregation_COUNT:
+		default:
+			continue
+		}
+		n := byCol[srcIdx]
+		if n == nil {
+			n = &needs{}
+			byCol[srcIdx] = n
+		}
+		n.indexes = append(n.indexes, i)
+		switch typs[i] {
+		case Aggregation_SUM:
+			n.sum = true
+		case Aggregation_MEAN:
+			n.mean = true
+		case Aggregation_MAX:
+			n.max = true
+		case Aggregation_MIN:
+			n.min = true
+		case Aggregation_COUNT:
+			n.count = true
+		}
+	}
+	for srcIdx, n := range byCol {
+		if len(n.indexes) < 2 {
+			continue
+		}
+		if n.count && !n.sum && !n.mean && !n.max && !n.min {
+			counts := countsToFloat(groupCounts)
+			for _, i := range n.indexes {
+				out[i] = counts
+			}
+			continue
+		}
+		agg, ok := cols[srcIdx].AggregateByGroup(groupCodes, nGroups, n.sum, n.mean, n.max, n.min, n.count)
+		if !ok {
+			continue
+		}
+		for _, i := range n.indexes {
+			switch typs[i] {
+			case Aggregation_SUM:
+				out[i] = agg.Sum
+			case Aggregation_MEAN:
+				out[i] = agg.Mean
+			case Aggregation_MAX:
+				out[i] = agg.Max
+			case Aggregation_MIN:
+				out[i] = agg.Min
+			case Aggregation_COUNT:
+				out[i] = agg.Count
+			}
+		}
+	}
 }
 
 func countsToFloat(counts []int) []float64 {

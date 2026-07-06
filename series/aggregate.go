@@ -2,6 +2,147 @@ package series
 
 import "math"
 
+// GroupedAggregation contains optional per-group aggregation results.
+type GroupedAggregation struct {
+	Sum   []float64
+	Mean  []float64
+	Max   []float64
+	Min   []float64
+	Count []float64
+}
+
+// AggregateByGroup calculates several common aggregations for all groups in one
+// scan. It supports int and float Series and returns false for other types.
+func (s Series) AggregateByGroup(groupCodes []int, nGroups int, needSum, needMean, needMax, needMin, needCount bool) (GroupedAggregation, bool) {
+	out := GroupedAggregation{}
+	if needSum || needMean {
+		out.Sum = make([]float64, nGroups)
+	}
+	if needMean {
+		out.Mean = make([]float64, nGroups)
+	}
+	if needMax {
+		out.Max = make([]float64, nGroups)
+	}
+	if needMin {
+		out.Min = make([]float64, nGroups)
+	}
+	if needCount || needMean {
+		out.Count = make([]float64, nGroups)
+	}
+	var seenMax, lockedMaxNaN []bool
+	if needMax {
+		seenMax = make([]bool, nGroups)
+		lockedMaxNaN = make([]bool, nGroups)
+	}
+	var seenMin, lockedMinNaN []bool
+	if needMin {
+		seenMin = make([]bool, nGroups)
+		lockedMinNaN = make([]bool, nGroups)
+	}
+
+	switch elems := s.elements.(type) {
+	case floatElements:
+		for row, groupID := range groupCodes {
+			elem := elems[row]
+			if needCount || needMean {
+				out.Count[groupID]++
+			}
+			value := elem.Float()
+			if needSum || needMean {
+				if !elem.IsNA() {
+					out.Sum[groupID] += elem.e
+				} else if needMean {
+					out.Sum[groupID] += value
+				}
+			}
+			if needMax && !lockedMaxNaN[groupID] {
+				if !seenMax[groupID] {
+					seenMax[groupID] = true
+					if elem.IsNA() {
+						out.Max[groupID] = math.NaN()
+						lockedMaxNaN[groupID] = true
+					} else {
+						out.Max[groupID] = elem.e
+					}
+				} else if !elem.IsNA() && elem.e > out.Max[groupID] {
+					out.Max[groupID] = elem.e
+				}
+			}
+			if needMin && !lockedMinNaN[groupID] {
+				if !seenMin[groupID] {
+					seenMin[groupID] = true
+					if elem.IsNA() {
+						out.Min[groupID] = math.NaN()
+						lockedMinNaN[groupID] = true
+					} else {
+						out.Min[groupID] = elem.e
+					}
+				} else if !elem.IsNA() && elem.e < out.Min[groupID] {
+					out.Min[groupID] = elem.e
+				}
+			}
+		}
+	case intElements:
+		for row, groupID := range groupCodes {
+			elem := elems[row]
+			if needCount || needMean {
+				out.Count[groupID]++
+			}
+			value := elem.Float()
+			if needSum || needMean {
+				if !elem.IsNA() {
+					out.Sum[groupID] += float64(elem.e)
+				} else if needMean {
+					out.Sum[groupID] += value
+				}
+			}
+			if needMax && !lockedMaxNaN[groupID] {
+				if !seenMax[groupID] {
+					seenMax[groupID] = true
+					if elem.IsNA() {
+						out.Max[groupID] = math.NaN()
+						lockedMaxNaN[groupID] = true
+					} else {
+						out.Max[groupID] = float64(elem.e)
+					}
+				} else if !elem.IsNA() && float64(elem.e) > out.Max[groupID] {
+					out.Max[groupID] = float64(elem.e)
+				}
+			}
+			if needMin && !lockedMinNaN[groupID] {
+				if !seenMin[groupID] {
+					seenMin[groupID] = true
+					if elem.IsNA() {
+						out.Min[groupID] = math.NaN()
+						lockedMinNaN[groupID] = true
+					} else {
+						out.Min[groupID] = float64(elem.e)
+					}
+				} else if !elem.IsNA() && float64(elem.e) < out.Min[groupID] {
+					out.Min[groupID] = float64(elem.e)
+				}
+			}
+		}
+	default:
+		return GroupedAggregation{}, false
+	}
+	if needMean {
+		for groupID, count := range out.Count {
+			if count > 0 {
+				out.Mean[groupID] = out.Sum[groupID] / count
+			}
+		}
+	}
+	if !needSum {
+		out.Sum = nil
+	}
+	if !needCount {
+		out.Count = nil
+	}
+	return out, true
+}
+
 // SumRows calculates the sum over selected row positions, skipping NaN values.
 func (s Series) SumRows(rows []int) float64 {
 	switch elems := s.elements.(type) {
