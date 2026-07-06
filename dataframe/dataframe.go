@@ -2861,38 +2861,17 @@ func (df DataFrame) Shift(periods int, subset ...string) DataFrame {
 		}
 		return false
 	}
-	result := df.Copy()
-	n := df.nrows
-	abs := periods
-	if abs < 0 {
-		abs = -abs
-	}
-	for ci, col := range result.columns {
+	columns := make([]series.Series, len(df.columns))
+	for ci, col := range df.columns {
 		if !applies(col.Name) {
+			columns[ci] = col.Copy()
 			continue
 		}
-		shifted := col.EmptyWithCapacity(n)
-		if periods > 0 {
-			// Shift down: prepend `periods` NaNs, drop last `periods` elements.
-			for i := 0; i < periods && i < n; i++ {
-				shifted.Append(nil)
-			}
-			for i := 0; i < n-periods; i++ {
-				shifted.Append(col.Elem(i))
-			}
-		} else {
-			// Shift up: drop first `abs` elements, append `abs` NaNs.
-			for i := abs; i < n; i++ {
-				shifted.Append(col.Elem(i))
-			}
-			for i := 0; i < abs && i < n; i++ {
-				shifted.Append(nil)
-			}
-		}
+		shifted := col.Shift(periods)
 		shifted.Name = col.Name
-		result.columns[ci] = shifted
+		columns[ci] = shifted
 	}
-	return result
+	return NewNoCopy(columns...)
 }
 
 // PctChange returns a new DataFrame where each numeric column is replaced by

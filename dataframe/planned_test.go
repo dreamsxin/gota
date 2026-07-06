@@ -172,6 +172,52 @@ func TestDataFrame_Shift_Subset(t *testing.T) {
 	}
 }
 
+func TestDataFrame_Shift_NonNumericAndLargePeriods(t *testing.T) {
+	df := New(
+		series.New([]string{"a", "b", "c"}, series.String, "S"),
+		series.New([]bool{true, false, true}, series.Bool, "B"),
+	)
+	out := df.Shift(5)
+	if out.Err != nil {
+		t.Fatal(out.Err)
+	}
+	for i := 0; i < out.Nrow(); i++ {
+		if !out.Col("S").Elem(i).IsNA() {
+			t.Errorf("Shift large periods: S[%d] should be NA", i)
+		}
+		if !out.Col("B").Elem(i).IsNA() {
+			t.Errorf("Shift large periods: B[%d] should be NA", i)
+		}
+	}
+}
+
+func TestDataFrame_Shift_NegativeLargePeriods(t *testing.T) {
+	df := New(series.New([]float64{1, 2, 3}, series.Float, "A"))
+	out := df.Shift(-5)
+	if out.Err != nil {
+		t.Fatal(out.Err)
+	}
+	for i := 0; i < out.Nrow(); i++ {
+		if !out.Col("A").Elem(i).IsNA() {
+			t.Errorf("Shift negative large periods: A[%d] should be NA", i)
+		}
+	}
+}
+
+func TestDataFrame_Shift_MinIntPeriods(t *testing.T) {
+	minInt := -int(^uint(0)>>1) - 1
+	df := New(series.New([]float64{1, 2, 3}, series.Float, "A"))
+	out := df.Shift(minInt)
+	if out.Err != nil {
+		t.Fatal(out.Err)
+	}
+	for i := 0; i < out.Nrow(); i++ {
+		if !out.Col("A").Elem(i).IsNA() {
+			t.Errorf("Shift min int periods: A[%d] should be NA", i)
+		}
+	}
+}
+
 // -----------------------------------------------------------------------
 // v1.3 — DataFrame.Assign
 // -----------------------------------------------------------------------
