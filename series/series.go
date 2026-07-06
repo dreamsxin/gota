@@ -593,7 +593,9 @@ func (s Series) Compare(comparator Comparator, comparando interface{}) Series {
 	if comparator == CompFunc {
 		f, ok := comparando.(compFunc)
 		if !ok {
-			panic("comparando is not a comparison function of type func(el Element) bool")
+			ret := s.Empty()
+			ret.Err = fmt.Errorf("comparando is not a comparison function of type func(el Element) bool")
+			return ret
 		}
 
 		for i := 0; i < s.Len(); i++ {

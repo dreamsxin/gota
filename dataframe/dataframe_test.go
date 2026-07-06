@@ -3314,6 +3314,26 @@ func TestDataFrame_DropDuplicates(t *testing.T) {
 	}
 }
 
+func TestDataFrame_FilterAggregation_InvalidAggregation(t *testing.T) {
+	df := New(series.New([]int{1, 2, 3}, series.Int, "x"))
+	got := df.FilterAggregation(Aggregation(99), F{Colname: "x", Comparator: series.Eq, Comparando: 1})
+	if got.Err == nil {
+		t.Fatal("expected invalid aggregation to return an error")
+	}
+}
+
+func TestDataFrame_Rapply_UnsupportedTypeReturnsError(t *testing.T) {
+	df := DataFrame{
+		columns: []series.Series{{Name: "bad"}},
+		ncols:   1,
+		nrows:   1,
+	}
+	got := df.Rapply(func(s series.Series) series.Series { return s })
+	if got.Err == nil {
+		t.Fatal("expected unsupported row type to return an error")
+	}
+}
+
 func TestDataFrame_FillNAStrategy(t *testing.T) {
 	df := New(
 		series.New([]interface{}{"a", nil, nil, "d"}, series.String, "A"),

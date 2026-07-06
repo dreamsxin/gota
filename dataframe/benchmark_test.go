@@ -10,25 +10,25 @@ import (
 )
 
 func generateSeries(n, rep int) (data []series.Series) {
-	rand.Seed(100)
+	r := rand.New(rand.NewSource(100))
 	for j := 0; j < rep; j++ {
 		var is []int
 		var bs []bool
 		var fs []float64
 		var ss []string
 		for i := 0; i < n; i++ {
-			is = append(is, rand.Int())
+			is = append(is, r.Int())
 		}
 		for i := 0; i < n; i++ {
-			fs = append(fs, rand.Float64())
+			fs = append(fs, r.Float64())
 		}
 		for i := 0; i < n; i++ {
-			ss = append(ss, strconv.Itoa(rand.Int()))
+			ss = append(ss, strconv.Itoa(r.Int()))
 		}
 		for i := 0; i < n; i++ {
-			r := rand.Intn(2)
+			roll := r.Intn(2)
 			b := false
-			if r == 1 {
+			if roll == 1 {
 				b = true
 			}
 			bs = append(bs, b)

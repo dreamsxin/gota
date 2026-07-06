@@ -427,7 +427,7 @@ func TestSeries_Compare_CompFunc(t *testing.T) {
 		comparator Comparator
 		comparando interface{}
 		expected   Series
-		panic      bool
+		wantErr    bool
 	}{
 		{
 			Strings([]string{"A", "B", "C", "B", "D", "BADA"}),
@@ -453,41 +453,31 @@ func TestSeries_Compare_CompFunc(t *testing.T) {
 		},
 	}
 	for testnum, test := range table {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					// recovered
-					if !test.panic {
-						t.Errorf("did not expected panic but was '%v'", r)
-					}
-				} else {
-					// nothing to recover from
-					if test.panic {
-						t.Errorf("exptected panic but did not panic")
-					}
-				}
-			}()
-
-			a := test.series
-			b := a.Compare(test.comparator, test.comparando)
-			if err := b.Err; err != nil {
-				t.Errorf("Test:%v\nError:%v", testnum, err)
+		a := test.series
+		b := a.Compare(test.comparator, test.comparando)
+		if test.wantErr {
+			if b.Err == nil {
+				t.Errorf("Test:%v\nExpected error", testnum)
 			}
-			expected := test.expected.Records()
-			received := b.Records()
-			if !reflect.DeepEqual(expected, received) {
-				t.Errorf(
-					"Test:%v\nExpected:\n%v\nReceived:\n%v",
-					testnum, expected, received,
-				)
-			}
-			if err := checkTypes(b); err != nil {
-				t.Errorf(
-					"Test:%v\nError:%v",
-					testnum, err,
-				)
-			}
-		}()
+			continue
+		}
+		if err := b.Err; err != nil {
+			t.Errorf("Test:%v\nError:%v", testnum, err)
+		}
+		expected := test.expected.Records()
+		received := b.Records()
+		if !reflect.DeepEqual(expected, received) {
+			t.Errorf(
+				"Test:%v\nExpected:\n%v\nReceived:\n%v",
+				testnum, expected, received,
+			)
+		}
+		if err := checkTypes(b); err != nil {
+			t.Errorf(
+				"Test:%v\nError:%v",
+				testnum, err,
+			)
+		}
 	}
 }
 

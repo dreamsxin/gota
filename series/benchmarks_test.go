@@ -9,29 +9,33 @@ import (
 )
 
 func generateInts(n int) (data []int) {
+	r := rand.New(rand.NewSource(100))
 	for i := 0; i < n; i++ {
-		data = append(data, rand.Int())
+		data = append(data, r.Int())
 	}
 	return
 }
 
 func generateFloats(n int) (data []float64) {
+	r := rand.New(rand.NewSource(100))
 	for i := 0; i < n; i++ {
-		data = append(data, rand.Float64())
+		data = append(data, r.Float64())
 	}
 	return
 }
 
 func generateStrings(n int) (data []string) {
+	r := rand.New(rand.NewSource(100))
 	for i := 0; i < n; i++ {
-		data = append(data, strconv.Itoa(rand.Int()))
+		data = append(data, strconv.Itoa(r.Int()))
 	}
 	return
 }
 
 func generateBools(n int) (data []bool) {
+	rng := rand.New(rand.NewSource(100))
 	for i := 0; i < n; i++ {
-		r := rand.Intn(2)
+		r := rng.Intn(2)
 		b := false
 		if r == 1 {
 			b = true
@@ -42,14 +46,14 @@ func generateBools(n int) (data []bool) {
 }
 
 func generateIntsN(n, k int) (data []int) {
+	r := rand.New(rand.NewSource(100))
 	for i := 0; i < n; i++ {
-		data = append(data, rand.Intn(k))
+		data = append(data, r.Intn(k))
 	}
 	return
 }
 
 func BenchmarkSeries_New(b *testing.B) {
-	rand.Seed(100)
 	table := []struct {
 		name       string
 		data       interface{}
@@ -146,7 +150,6 @@ func BenchmarkSeries_New(b *testing.B) {
 }
 
 func BenchmarkSeries_Copy(b *testing.B) {
-	rand.Seed(100)
 	table := []struct {
 		name   string
 		series series.Series
@@ -178,7 +181,6 @@ func BenchmarkSeries_Copy(b *testing.B) {
 }
 
 func BenchmarkSeries_Subset(b *testing.B) {
-	rand.Seed(100)
 	table := []struct {
 		name    string
 		indexes interface{}
@@ -215,7 +217,6 @@ func BenchmarkSeries_Subset(b *testing.B) {
 }
 
 func BenchmarkSeries_Set(b *testing.B) {
-	rand.Seed(100)
 	table := []struct {
 		name      string
 		indexes   interface{}

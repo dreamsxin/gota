@@ -21,8 +21,6 @@ func timeSeries(vals ...interface{}) Series {
 	return New(vals, Time, "t")
 }
 
-func timeRecords(s Series) []string { return s.Records() }
-
 func TestTimeSeries_Copy(t *testing.T) {
 	s := timeSeries(t0, t1, t2)
 	c := s.Copy()

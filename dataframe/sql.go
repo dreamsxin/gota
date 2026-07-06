@@ -110,9 +110,9 @@ const (
 type SQLInsertOption func(*sqlInsertOptions)
 
 type sqlInsertOptions struct {
-	batchSize        int                // rows per INSERT statement (default 500)
-	createTable      bool               // create the table if it doesn't exist
-	truncateFirst    bool               // TRUNCATE / DELETE FROM before inserting
+	batchSize        int                 // rows per INSERT statement (default 500)
+	createTable      bool                // create the table if it doesn't exist
+	truncateFirst    bool                // TRUNCATE / DELETE FROM before inserting
 	placeholderStyle SQLPlaceholderStyle // placeholder syntax (default ?)
 }
 
@@ -266,12 +266,4 @@ func seriesTypeToSQL(t series.Type) string {
 	default:
 		return "TEXT"
 	}
-}
-
-func repeatStr(s string, n int) []string {
-	out := make([]string, n)
-	for i := range out {
-		out[i] = s
-	}
-	return out
 }

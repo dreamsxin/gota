@@ -1384,6 +1384,11 @@ func (df DataFrame) FilterAggregation(agg Aggregation, filters ...F) DataFrame {
 	if df.Err != nil {
 		return df
 	}
+	switch agg {
+	case Or, And:
+	default:
+		return DataFrame{Err: fmt.Errorf("filter: unknown aggregation: %v", agg)}
+	}
 
 	compResults := make([]series.Series, len(filters))
 	for i, f := range filters {
@@ -1422,8 +1427,6 @@ func (df DataFrame) FilterAggregation(agg Aggregation, filters ...F) DataFrame {
 				res[j] = res[j] || nextRes[j]
 			case And:
 				res[j] = res[j] && nextRes[j]
-			default:
-				panic(agg)
 			}
 		}
 	}
@@ -1552,7 +1555,7 @@ func (df DataFrame) Rapply(f func(series.Series) series.Series) DataFrame {
 		return df
 	}
 
-	detectType := func(types []series.Type) series.Type {
+	detectType := func(types []series.Type) (series.Type, error) {
 		var hasStrings, hasFloats, hasInts, hasBools bool
 		for _, t := range types {
 			switch t {
@@ -1568,21 +1571,24 @@ func (df DataFrame) Rapply(f func(series.Series) series.Series) DataFrame {
 		}
 		switch {
 		case hasStrings:
-			return series.String
+			return series.String, nil
 		case hasBools:
-			return series.Bool
+			return series.Bool, nil
 		case hasFloats:
-			return series.Float
+			return series.Float, nil
 		case hasInts:
-			return series.Int
+			return series.Int, nil
 		default:
-			panic("type not supported")
+			return series.String, fmt.Errorf("type not supported")
 		}
 	}
 
 	// Detect row type prior to function application
 	types := df.Types()
-	rowType := detectType(types)
+	rowType, err := detectType(types)
+	if err != nil {
+		return DataFrame{Err: fmt.Errorf("Rapply: %v", err)}
+	}
 
 	// Create Element matrix
 	elements := make([][]series.Element, df.nrows)
@@ -1616,7 +1622,10 @@ func (df DataFrame) Rapply(f func(series.Series) series.Series) DataFrame {
 		for i := 0; i < df.nrows; i++ {
 			types[i] = elements[i][j].Type()
 		}
-		colType := detectType(types)
+		colType, err := detectType(types)
+		if err != nil {
+			return DataFrame{Err: fmt.Errorf("Rapply: %v", err)}
+		}
 		s := series.New(nil, colType, "").EmptyWithCapacity(df.nrows)
 		for i := 0; i < df.nrows; i++ {
 			s.Append(elements[i][j])
@@ -2526,19 +2535,6 @@ func (df DataFrame) FillNaN(colname string, value series.Series) DataFrame {
 	return df
 }
 
-// rowKey builds a composite string key from all columns of a single row.
-// Used by Duplicated and DropDuplicates.
-func (df DataFrame) rowKey(i int) string {
-	var sb strings.Builder
-	for c, col := range df.columns {
-		if c > 0 {
-			sb.WriteByte('|')
-		}
-		sb.WriteString(col.Elem(i).String())
-	}
-	return sb.String()
-}
-
 // Duplicated returns a bool slice where true indicates the row is a duplicate
 // of an earlier row.  Only the first occurrence is considered non-duplicate.
 // If subset is non-empty, only the specified columns are used for comparison.
@@ -3364,31 +3360,28 @@ func fixColnames(colnames []string) {
 
 func parseSelectIndexes(l int, indexes SelectIndexes, colnames []string) ([]int, error) {
 	var idx []int
-	switch indexes.(type) {
+	switch indexes := indexes.(type) {
 	case []int:
-		idx = indexes.([]int)
+		idx = indexes
 	case int:
-		idx = []int{indexes.(int)}
+		idx = []int{indexes}
 	case []bool:
-		bools := indexes.([]bool)
-		if len(bools) != l {
+		if len(indexes) != l {
 			return nil, fmt.Errorf("indexing error: index dimensions mismatch")
 		}
-		for i, b := range bools {
+		for i, b := range indexes {
 			if b {
 				idx = append(idx, i)
 			}
 		}
 	case string:
-		s := indexes.(string)
-		i := findInStringSlice(s, colnames)
+		i := findInStringSlice(indexes, colnames)
 		if i < 0 {
-			return nil, fmt.Errorf("can't select columns: column name %q not found", s)
+			return nil, fmt.Errorf("can't select columns: column name %q not found", indexes)
 		}
 		idx = append(idx, i)
 	case []string:
-		xs := indexes.([]string)
-		for _, s := range xs {
+		for _, s := range indexes {
 			i := findInStringSlice(s, colnames)
 			if i < 0 {
 				return nil, fmt.Errorf("can't select columns: column name %q not found", s)
@@ -3396,24 +3389,23 @@ func parseSelectIndexes(l int, indexes SelectIndexes, colnames []string) ([]int,
 			idx = append(idx, i)
 		}
 	case series.Series:
-		s := indexes.(series.Series)
-		if err := s.Err; err != nil {
+		if err := indexes.Err; err != nil {
 			return nil, fmt.Errorf("indexing error: new values has errors: %v", err)
 		}
-		if s.HasNaN() {
+		if indexes.HasNaN() {
 			return nil, fmt.Errorf("indexing error: indexes contain NaN")
 		}
-		switch s.Type() {
+		switch indexes.Type() {
 		case series.Int:
-			return s.Int()
+			return indexes.Int()
 		case series.Bool:
-			bools, err := s.Bool()
+			bools, err := indexes.Bool()
 			if err != nil {
 				return nil, fmt.Errorf("indexing error: %v", err)
 			}
 			return parseSelectIndexes(l, bools, colnames)
 		case series.String:
-			xs := indexes.(series.Series).Records()
+			xs := indexes.Records()
 			return parseSelectIndexes(l, xs, colnames)
 		default:
 			return nil, fmt.Errorf("indexing error: unknown indexing mode")
@@ -3704,10 +3696,8 @@ func (df DataFrame) buildGeneratedCols(aggregatedDF DataFrame, columns []string,
 	columnGroups := aggregatedDF.GroupBy(columns...).GetGroups()
 	generatedColElemsList := make([][]series.Element, 0, len(columnGroups))
 	for _, columnGroupDf := range columnGroups {
-		columnStrValues := make([]string, 0, len(columns))
 		columnElems := make([]series.Element, 0, len(columns))
 		for _, column := range columns {
-			columnStrValues = append(columnStrValues, columnGroupDf.Col(column).Elem(0).String())
 			columnElems = append(columnElems, columnGroupDf.Col(column).Elem(0))
 		}
 		generatedColElemsList = append(generatedColElemsList, columnElems)

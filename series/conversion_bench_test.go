@@ -1,7 +1,6 @@
 package series_test
 
 import (
-	"math/rand"
 	"testing"
 
 	"github.com/dreamsxin/gota/series"
@@ -9,7 +8,6 @@ import (
 
 // Benchmark for optimized BatchConvert vs regular New
 func BenchmarkBatchConvert_IntToString(b *testing.B) {
-	rand.Seed(100)
 	ints := generateInts(100000)
 
 	b.Run("Regular_New", func(b *testing.B) {
@@ -26,7 +24,6 @@ func BenchmarkBatchConvert_IntToString(b *testing.B) {
 }
 
 func BenchmarkBatchConvert_FloatToString(b *testing.B) {
-	rand.Seed(100)
 	floats := generateFloats(100000)
 
 	b.Run("Regular_New", func(b *testing.B) {
@@ -43,7 +40,6 @@ func BenchmarkBatchConvert_FloatToString(b *testing.B) {
 }
 
 func BenchmarkBatchConvert_IntToFloat(b *testing.B) {
-	rand.Seed(100)
 	ints := generateInts(100000)
 
 	b.Run("Regular_New", func(b *testing.B) {

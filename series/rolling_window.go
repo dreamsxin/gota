@@ -238,11 +238,6 @@ func (r RollingWindow) floatSlice() []float64 {
 	return vals
 }
 
-// nanResult returns a NaN float64 Series of length n with the given name.
-func nanResult(name string) Series {
-	return newFloatSeries(name, 0)
-}
-
 // hasEnough returns true if the window [start,end) has at least minPeriods
 // non-NaN values.
 func hasEnough(vals []float64, start, end, minPeriods int) bool {
