@@ -820,6 +820,16 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 		columns = append(columns, col)
 	}
 
+	precomputed := make([][]float64, len(colnames))
+	for i, srcIdx := range aggIdxs {
+		switch typs[i] {
+		case Aggregation_SUM:
+			precomputed[i] = gps.source.columns[srcIdx].SumByGroup(gps.groupCodes, nGroups)
+		case Aggregation_MEAN:
+			precomputed[i] = gps.source.columns[srcIdx].MeanByGroup(gps.groupCodes, nGroups)
+		}
+	}
+
 	for groupIdx := range gps.groupOrder {
 		rows := gps.groupRowList[groupIdx]
 		if len(rows) == 0 {
@@ -829,7 +839,12 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 			columns[outIdx].Append(gps.source.columns[srcIdx].Elem(rows[0]))
 		}
 		for i, srcIdx := range aggIdxs {
-			value := aggregateColumnRows(gps.source.columns[srcIdx], rows, typs[i])
+			var value float64
+			if precomputed[i] != nil {
+				value = precomputed[i][groupIdx]
+			} else {
+				value = aggregateColumnRows(gps.source.columns[srcIdx], rows, typs[i])
+			}
 			columns[len(gps.keyIdxs)+i].Append(value)
 		}
 	}
@@ -841,23 +856,9 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 func aggregateColumnRows(col series.Series, rows []int, typ AggregationType) float64 {
 	switch typ {
 	case Aggregation_MAX:
-		max := col.Elem(rows[0])
-		for _, row := range rows[1:] {
-			elem := col.Elem(row)
-			if elem.Greater(max) {
-				max = elem
-			}
-		}
-		return max.Float()
+		return col.MaxRows(rows)
 	case Aggregation_MIN:
-		min := col.Elem(rows[0])
-		for _, row := range rows[1:] {
-			elem := col.Elem(row)
-			if elem.Less(min) {
-				min = elem
-			}
-		}
-		return min.Float()
+		return col.MinRows(rows)
 	case Aggregation_MEAN:
 		return col.MeanRows(rows)
 	case Aggregation_SUM:

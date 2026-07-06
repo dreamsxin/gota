@@ -290,11 +290,24 @@ func BenchmarkDataFrame_GroupByAggregation(b *testing.B) {
 			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_SUM}, []string{"value"})
 		}
 	})
+	b.Run("GroupByMax", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			groups := df.GroupBy("key")
+			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_MAX}, []string{"value"})
+		}
+	})
 	b.Run("AggregationOnly", func(b *testing.B) {
 		groups := df.GroupBy("key")
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_SUM}, []string{"value"})
+		}
+	})
+	b.Run("AggregationOnlyMax", func(b *testing.B) {
+		groups := df.GroupBy("key")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_MAX}, []string{"value"})
 		}
 	})
 }
