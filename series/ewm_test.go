@@ -91,26 +91,50 @@ func TestEWMAlpha(t *testing.T) {
 // -----------------------------------------------------------------------
 
 func TestEWM_Std(t *testing.T) {
-	// std = sqrt(var); just sanity-check non-NaN values are >= 0
 	s := Floats([]float64{1, 2, 3, 4, 5, 6, 7})
 	std := seriesFloats(s.EWM(3).Std())
-	for i, v := range std {
-		if !math.IsNaN(v) && v < 0 {
-			t.Errorf("EWM Std[%d]: got negative value %v", i, v)
+	want := []float64{
+		math.NaN(),
+		0.7071067811865477,
+		0.9636241116594317,
+		1.1771636613972953,
+		1.3452425132127066,
+		1.4709162008918402,
+		1.5607315639222439,
+	}
+	if len(std) != len(want) {
+		t.Fatalf("EWM Std: length mismatch got=%d want=%d", len(std), len(want))
+	}
+	for i := range want {
+		if !rollingFloatEq(std[i], want[i], 1e-12) {
+			t.Errorf("EWM Std[%d]: got %.15f want %.15f", i, std[i], want[i])
 		}
 	}
 }
 
 // -----------------------------------------------------------------------
-// EWM – Var (non-negativity)
+// EWM – Var
 // -----------------------------------------------------------------------
 
 func TestEWM_Var(t *testing.T) {
 	s := Floats([]float64{2, 4, 4, 4, 5, 5, 7, 9})
 	vv := seriesFloats(s.EWM(3).Var())
-	for i, v := range vv {
-		if !math.IsNaN(v) && v < 0 {
-			t.Errorf("EWM Var[%d]: got negative value %v", i, v)
+	want := []float64{
+		math.NaN(),
+		2.000000000000001,
+		0.8571428571428578,
+		0.40000000000000036,
+		0.6838709677419359,
+		0.4454685099846394,
+		2.1664791901012372,
+		4.753496989346919,
+	}
+	if len(vv) != len(want) {
+		t.Fatalf("EWM Var: length mismatch got=%d want=%d", len(vv), len(want))
+	}
+	for i := range want {
+		if !rollingFloatEq(vv[i], want[i], 1e-12) {
+			t.Errorf("EWM Var[%d]: got %.15f want %.15f", i, vv[i], want[i])
 		}
 	}
 }

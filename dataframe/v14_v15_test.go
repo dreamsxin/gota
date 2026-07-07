@@ -19,21 +19,23 @@ func TestEWM_Var_PandasCompat(t *testing.T) {
 	// Cross-check with pandas:
 	//   pd.Series([1,2,3,4,5]).ewm(span=3, adjust=True).var()
 	// span=3 → alpha=0.5
-	// Expected (approx): [NaN, 0.5, 0.6667, 0.7143, 0.7273]
+	// Expected from the weighted ddof=1 formula implemented by EWM.Var.
+	want := []float64{math.NaN(), 0.5, 0.9285714285714286, 1.3857142857142857, 1.8096774193548386}
 	s := series.Floats([]float64{1, 2, 3, 4, 5})
 	got := s.EWM(3).Var()
-	if got.Len() != 5 {
-		t.Fatalf("EWM Var len: got %d want 5", got.Len())
+	if got.Len() != len(want) {
+		t.Fatalf("EWM Var len: got %d want %d", got.Len(), len(want))
 	}
-	// First element: only 1 observation → NaN
-	if !math.IsNaN(got.Elem(0).Float()) {
-		t.Errorf("EWM Var[0]: got %v want NaN", got.Elem(0).Float())
-	}
-	// All subsequent values must be positive.
-	for i := 1; i < got.Len(); i++ {
+	for i := range want {
 		v := got.Elem(i).Float()
-		if math.IsNaN(v) || v <= 0 {
-			t.Errorf("EWM Var[%d]: got %v, want positive", i, v)
+		if math.IsNaN(want[i]) {
+			if !math.IsNaN(v) {
+				t.Errorf("EWM Var[%d]: got %v want NaN", i, v)
+			}
+			continue
+		}
+		if math.Abs(v-want[i]) > 1e-12 {
+			t.Errorf("EWM Var[%d]: got %.15f want %.15f", i, v, want[i])
 		}
 	}
 	// Std = sqrt(Var) must be consistent.
@@ -70,16 +72,9 @@ func TestDataFrame_Sample_RowOrder(t *testing.T) {
 		v, _ := out.Col("idx").Elem(i).Int()
 		vals[i] = v
 	}
-	// They should NOT be in ascending order (with seed=1 they won't be).
-	sorted := true
-	for i := 1; i < len(vals); i++ {
-		if vals[i] < vals[i-1] {
-			sorted = false
-			break
-		}
-	}
-	if sorted {
-		t.Log("Sample: result happened to be sorted (may be a false positive with this seed)")
+	want := []int{9, 4, 2, 6, 8}
+	if !reflect.DeepEqual(vals, want) {
+		t.Fatalf("Sample seed=1 order: got %v want %v", vals, want)
 	}
 }
 
@@ -132,6 +127,20 @@ func TestGroups_AggregationParallel(t *testing.T) {
 	if seq.Nrow() != par.Nrow() {
 		t.Errorf("AggregationParallel rows: seq=%d par=%d", seq.Nrow(), par.Nrow())
 	}
+	if !reflect.DeepEqual(seq.Names(), par.Names()) {
+		t.Fatalf("AggregationParallel names: got %v want %v", par.Names(), seq.Names())
+	}
+	if !reflect.DeepEqual(seq.Records(), par.Records()) {
+		t.Fatalf("AggregationParallel records: got %v want %v", par.Records(), seq.Records())
+	}
+	want := [][]string{
+		{"grp", "val_SUM"},
+		{"A", "9.000000"},
+		{"B", "6.000000"},
+	}
+	if !reflect.DeepEqual(par.Records(), want) {
+		t.Fatalf("AggregationParallel result: got %v want %v", par.Records(), want)
+	}
 }
 
 // -----------------------------------------------------------------------
@@ -139,27 +148,31 @@ func TestGroups_AggregationParallel(t *testing.T) {
 // -----------------------------------------------------------------------
 
 func TestReadXLSX_WithSheet(t *testing.T) {
-	// Write a two-sheet workbook, then read the second sheet.
 	df1 := New(series.New([]string{"sheet1"}, series.String, "name"))
-	df2 := New(series.New([]string{"sheet2"}, series.String, "name"))
+	df2 := New(
+		series.New([]string{"sheet2"}, series.String, "name"),
+		series.New([]int{42}, series.Int, "value"),
+	)
 
 	var buf bytes.Buffer
-	// Write df1 to Sheet1 (default).
-	if err := df1.WriteXLSX(&buf); err != nil {
+	if err := WriteXLSXMultiSheet(&buf, SheetData{"First", df1}, SheetData{"Second", df2}); err != nil {
 		t.Fatal(err)
 	}
-	// We can only write one sheet with current API; just verify WithSheet
-	// option is accepted without error when reading the default sheet.
-	buf.Reset()
-	if err := df2.WriteXLSX(&buf); err != nil {
-		t.Fatal(err)
-	}
-	got := ReadXLSX(bytes.NewReader(buf.Bytes()), WithSheet("Sheet1"))
+	got := ReadXLSX(bytes.NewReader(buf.Bytes()), WithSheet("Second"))
 	if got.Err != nil {
 		t.Fatalf("ReadXLSX WithSheet: %v", got.Err)
 	}
 	if got.Nrow() != 1 {
 		t.Errorf("ReadXLSX WithSheet rows: got %d want 1", got.Nrow())
+	}
+	if got.Ncol() != 2 {
+		t.Fatalf("ReadXLSX WithSheet cols: got %d want 2", got.Ncol())
+	}
+	if got.Col("name").Elem(0).String() != "sheet2" {
+		t.Errorf("ReadXLSX WithSheet name: got %s want sheet2", got.Col("name").Elem(0).String())
+	}
+	if got.Col("value").Elem(0).String() != "42" {
+		t.Errorf("ReadXLSX WithSheet value: got %s want 42", got.Col("value").Elem(0).String())
 	}
 }
 
@@ -203,6 +216,14 @@ func TestNDJSON_RoundTrip(t *testing.T) {
 	}
 	if got.Ncol() != 3 {
 		t.Errorf("ReadNDJSON cols: got %d want 3", got.Ncol())
+	}
+	want := [][]string{
+		{"age", "name", "score"},
+		{"30", "alice", "1.500000"},
+		{"25", "bob", "2.500000"},
+	}
+	if gotRecords := got.Records(); !reflect.DeepEqual(gotRecords, want) {
+		t.Errorf("ReadNDJSON records: got %v want %v", gotRecords, want)
 	}
 }
 
@@ -341,5 +362,11 @@ func TestDataFrame_StackUnstack_RoundTrip(t *testing.T) {
 	if back.Nrow() != wide.Nrow() || back.Ncol() != wide.Ncol() {
 		t.Errorf("Stack/Unstack round-trip: got %dx%d want %dx%d",
 			back.Nrow(), back.Ncol(), wide.Nrow(), wide.Ncol())
+	}
+	if !reflect.DeepEqual(back.Names(), wide.Names()) {
+		t.Fatalf("Stack/Unstack names: got %v want %v", back.Names(), wide.Names())
+	}
+	if !reflect.DeepEqual(back.Records(), wide.Records()) {
+		t.Fatalf("Stack/Unstack records: got %v want %v", back.Records(), wide.Records())
 	}
 }

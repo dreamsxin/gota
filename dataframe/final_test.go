@@ -92,6 +92,9 @@ func TestWriteXLSXMultiSheet(t *testing.T) {
 	if got1.Nrow() != 2 {
 		t.Errorf("Names sheet rows: got %d want 2", got1.Nrow())
 	}
+	if got := got1.Records(); !recordsEqual(got, df1.Records()) {
+		t.Errorf("Names sheet records: got %v want %v", got, df1.Records())
+	}
 
 	// Read back the second sheet.
 	got2 := ReadXLSX(bytes.NewReader(buf.Bytes()), WithSheet("Values"))
@@ -100,6 +103,9 @@ func TestWriteXLSXMultiSheet(t *testing.T) {
 	}
 	if got2.Nrow() != 3 {
 		t.Errorf("Values sheet rows: got %d want 3", got2.Nrow())
+	}
+	if got := got2.Records(); !recordsEqual(got, df2.Records()) {
+		t.Errorf("Values sheet records: got %v want %v", got, df2.Records())
 	}
 }
 

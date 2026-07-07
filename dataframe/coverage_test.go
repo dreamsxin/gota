@@ -438,12 +438,6 @@ func TestSeries_Clip_NaN(t *testing.T) {
 // -----------------------------------------------------------------------
 
 func TestDataFrame_Resample_AllFreqs(t *testing.T) {
-	import_time := func(y, m, d, h int) interface{} {
-		return nil // placeholder — use series.New with time.Time
-	}
-	_ = import_time
-
-	// Use string-based time construction via series.New
 	times := []string{
 		"2024-01-15T10:00:00+00:00",
 		"2024-01-15T11:00:00+00:00",
@@ -455,19 +449,40 @@ func TestDataFrame_Resample_AllFreqs(t *testing.T) {
 		series.New([]float64{1, 2, 3, 4}, series.Float, "v"),
 	)
 
-	for _, freq := range []ResampleFreq{ResampleHourly, ResampleDaily, ResampleWeekly, ResampleMonthly, ResampleYearly} {
-		rg := df.Resample("ts", freq)
-		if rg.Err != nil {
-			t.Errorf("Resample %s: %v", freq, rg.Err)
-			continue
-		}
-		result := rg.Aggregation([]AggregationType{Aggregation_COUNT}, []string{"v"})
-		if result.Err != nil {
-			t.Errorf("Resample %s Aggregation: %v", freq, result.Err)
-		}
-		if result.Nrow() == 0 {
-			t.Errorf("Resample %s: expected > 0 rows", freq)
-		}
+	tests := []struct {
+		freq    ResampleFreq
+		periods []string
+		counts  []float64
+	}{
+		{ResampleHourly, []string{"2024-01-15T10:00:00Z", "2024-01-15T11:00:00Z", "2024-01-16T09:00:00Z", "2024-02-01T08:00:00Z"}, []float64{1, 1, 1, 1}},
+		{ResampleDaily, []string{"2024-01-15", "2024-01-16", "2024-02-01"}, []float64{2, 1, 1}},
+		{ResampleWeekly, []string{"2024-W03", "2024-W05"}, []float64{3, 1}},
+		{ResampleMonthly, []string{"2024-01", "2024-02"}, []float64{3, 1}},
+		{ResampleYearly, []string{"2024"}, []float64{4}},
+	}
+
+	for _, test := range tests {
+		t.Run(string(test.freq), func(t *testing.T) {
+			rg := df.Resample("ts", test.freq)
+			if rg.Err != nil {
+				t.Fatalf("Resample %s: %v", test.freq, rg.Err)
+			}
+			result := rg.Aggregation([]AggregationType{Aggregation_COUNT}, []string{"v"})
+			if result.Err != nil {
+				t.Fatalf("Resample %s Aggregation: %v", test.freq, result.Err)
+			}
+			if got := result.Col("period").Records(); !reflect.DeepEqual(got, test.periods) {
+				t.Fatalf("Resample %s periods: got %v want %v", test.freq, got, test.periods)
+			}
+			if result.Nrow() != len(test.counts) {
+				t.Fatalf("Resample %s rows: got %d want %d", test.freq, result.Nrow(), len(test.counts))
+			}
+			for i, want := range test.counts {
+				if got := result.Col("v_COUNT").Elem(i).Float(); got != want {
+					t.Fatalf("Resample %s count[%d]: got %v want %v", test.freq, i, got, want)
+				}
+			}
+		})
 	}
 }
 

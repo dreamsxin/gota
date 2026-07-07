@@ -54,13 +54,14 @@ func TestFromSQL_Basic(t *testing.T) {
 	if df.Ncol() != 3 {
 		t.Errorf("FromSQL cols: got %d want 3", df.Ncol())
 	}
-	// Check name column.
-	names := df.Col("name").Records()
-	expected := []string{"Alice", "Bob", "Carol"}
-	for i, want := range expected {
-		if names[i] != want {
-			t.Errorf("FromSQL name[%d]: got %q want %q", i, names[i], want)
-		}
+	expected := [][]string{
+		{"name", "age", "score"},
+		{"Alice", "30", "9.500000"},
+		{"Bob", "25", "8.000000"},
+		{"Carol", "35", "7.500000"},
+	}
+	if got := df.Records(); !recordsEqual(got, expected) {
+		t.Errorf("FromSQL records: got %v want %v", got, expected)
 	}
 }
 
@@ -156,14 +157,32 @@ func TestWriteSQL_RoundTrip(t *testing.T) {
 	if got.Nrow() != orig.Nrow() {
 		t.Errorf("SQL round-trip rows: got %d want %d", got.Nrow(), orig.Nrow())
 	}
-	// Labels should match.
-	for i := 0; i < orig.Nrow(); i++ {
-		o := orig.Col("label").Elem(i).String()
-		g := got.Col("label").Elem(i).String()
-		if o != g {
-			t.Errorf("SQL round-trip label[%d]: got %q want %q", i, g, o)
+	expected := [][]string{
+		{"label", "value"},
+		{"x", "1.100000"},
+		{"y", "2.200000"},
+		{"z", "3.300000"},
+	}
+	if gotRecords := got.Records(); !recordsEqual(gotRecords, expected) {
+		t.Errorf("SQL round-trip records: got %v want %v", gotRecords, expected)
+	}
+}
+
+func recordsEqual(got, want [][]string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if len(got[i]) != len(want[i]) {
+			return false
+		}
+		for j := range want[i] {
+			if got[i][j] != want[i][j] {
+				return false
+			}
 		}
 	}
+	return true
 }
 
 func TestWriteSQL_TruncateFirst(t *testing.T) {

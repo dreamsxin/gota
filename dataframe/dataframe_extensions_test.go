@@ -229,6 +229,16 @@ func TestDataFrame_Melt_Basic(t *testing.T) {
 	if !reflect.DeepEqual(names, []string{"id", "variable", "value"}) {
 		t.Errorf("Melt names: got %v want [id variable value]", names)
 	}
+	wantRecords := [][]string{
+		{"id", "variable", "value"},
+		{"x", "v1", "1.000000"},
+		{"x", "v2", "3.000000"},
+		{"y", "v1", "2.000000"},
+		{"y", "v2", "4.000000"},
+	}
+	if got := out.Records(); !reflect.DeepEqual(got, wantRecords) {
+		t.Errorf("Melt records: got %v want %v", got, wantRecords)
+	}
 }
 
 func TestDataFrame_Melt_AllValueVars(t *testing.T) {
@@ -249,6 +259,16 @@ func TestDataFrame_Melt_AllValueVars(t *testing.T) {
 	names := out.Names()
 	if names[1] != "variable" || names[2] != "value" {
 		t.Errorf("Melt default names: got %v", names)
+	}
+	wantRecords := [][]string{
+		{"key", "variable", "value"},
+		{"a", "X", "10.000000"},
+		{"a", "Y", "30.000000"},
+		{"b", "X", "20.000000"},
+		{"b", "Y", "40.000000"},
+	}
+	if got := out.Records(); !reflect.DeepEqual(got, wantRecords) {
+		t.Errorf("Melt all-valueVars records: got %v want %v", got, wantRecords)
 	}
 }
 

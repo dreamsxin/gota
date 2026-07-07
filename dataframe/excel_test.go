@@ -43,11 +43,9 @@ func TestExcel_RoundTrip(t *testing.T) {
 		t.Errorf("names: got %v want %v", got.Names(), orig.Names())
 	}
 
-	// Name column values.
-	origNames := orig.Col("Name").Records()
-	gotNames := got.Col("Name").Records()
-	if !reflect.DeepEqual(origNames, gotNames) {
-		t.Errorf("Name column mismatch: got %v want %v", gotNames, origNames)
+	// Full round-trip values.
+	if !reflect.DeepEqual(got.Records(), orig.Records()) {
+		t.Errorf("records mismatch: got %v want %v", got.Records(), orig.Records())
 	}
 }
 

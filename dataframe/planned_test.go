@@ -95,11 +95,11 @@ func TestDataFrame_Describe_Time(t *testing.T) {
 	// Row 5 (index 5) is "min", row 9 is "max" (0-indexed, after count/nunique).
 	minVal := tsCol.Elem(5).String()
 	maxVal := tsCol.Elem(9).String()
-	if minVal == "-" {
-		t.Error("Describe Time: min should not be '-'")
+	if minVal != "2024-01-01T00:00:00Z" {
+		t.Errorf("Describe Time: min got %s want 2024-01-01T00:00:00Z", minVal)
 	}
-	if maxVal == "-" {
-		t.Error("Describe Time: max should not be '-'")
+	if maxVal != "2024-06-01T00:00:00Z" {
+		t.Errorf("Describe Time: max got %s want 2024-06-01T00:00:00Z", maxVal)
 	}
 	if minVal > maxVal {
 		t.Errorf("Describe Time: min %s > max %s", minVal, maxVal)
