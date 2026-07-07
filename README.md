@@ -404,6 +404,11 @@ sheets, err := dataframe.ReadXLSXSheets(r) // map[string]DataFrame, one per shee
 // Write
 err := df.WriteXLSX(w)
 err := df.WriteXLSXFile("output.xlsx")
+err := df.WriteXLSX(w,
+    dataframe.WithXLSXBoldHeader(true),
+    dataframe.WithXLSXColumnWidths(map[string]float64{"name": 18}),
+    dataframe.WithXLSXNumberFormats(map[string]string{"amount": "#,##0.00"}),
+)
 ```
 
 ### Parquet I/O

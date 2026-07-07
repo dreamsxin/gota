@@ -140,22 +140,8 @@ func (df DataFrame) WriteXLSX(w io.Writer, options ...WriteOption) error {
 		}
 	}
 
-	records := df.Records() // first row is header
-	startRow := 0
-	if !cfg.writeHeader {
-		startRow = 1
-	}
-
-	for i := startRow; i < len(records); i++ {
-		for j, cell := range records[i] {
-			coord, err := excelize.CoordinatesToCellName(j+1, i-startRow+1)
-			if err != nil {
-				return fmt.Errorf("WriteXLSX: %v", err)
-			}
-			if err := f.SetCellValue(sheetName, coord, cell); err != nil {
-				return fmt.Errorf("WriteXLSX: %v", err)
-			}
-		}
+	if err := writeXLSXToSheet(f, sheetName, df, cfg); err != nil {
+		return fmt.Errorf("WriteXLSX: %v", err)
 	}
 
 	_, err := f.WriteTo(w)
@@ -228,6 +214,13 @@ func (df DataFrame) WriteXLSXSheet(f interface {
 		}
 	}
 
+	if err := writeXLSXToSheet(xl, sheetName, df, cfg); err != nil {
+		return fmt.Errorf("WriteXLSXSheet: %v", err)
+	}
+	return nil
+}
+
+func writeXLSXToSheet(f *excelize.File, sheetName string, df DataFrame, cfg writeOptions) error {
 	records := df.Records()
 	startRow := 0
 	if !cfg.writeHeader {
@@ -237,11 +230,77 @@ func (df DataFrame) WriteXLSXSheet(f interface {
 		for j, cell := range records[i] {
 			coord, err := excelize.CoordinatesToCellName(j+1, i-startRow+1)
 			if err != nil {
-				return fmt.Errorf("WriteXLSXSheet: %v", err)
+				return err
 			}
-			if err := xl.SetCellValue(sheetName, coord, cell); err != nil {
-				return fmt.Errorf("WriteXLSXSheet: %v", err)
+			if err := f.SetCellValue(sheetName, coord, cell); err != nil {
+				return err
 			}
+		}
+	}
+	return applyXLSXStyles(f, sheetName, df, cfg)
+}
+
+func applyXLSXStyles(f *excelize.File, sheetName string, df DataFrame, cfg writeOptions) error {
+	if cfg.xlsxBoldHeader && cfg.writeHeader && df.Ncol() > 0 {
+		styleID, err := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
+		if err != nil {
+			return err
+		}
+		endCell, err := excelize.CoordinatesToCellName(df.Ncol(), 1)
+		if err != nil {
+			return err
+		}
+		if err := f.SetCellStyle(sheetName, "A1", endCell, styleID); err != nil {
+			return err
+		}
+	}
+
+	nameToIndex := make(map[string]int, df.Ncol())
+	for i, name := range df.Names() {
+		nameToIndex[name] = i + 1
+	}
+
+	for name, width := range cfg.xlsxColumnWidths {
+		colIdx, ok := nameToIndex[name]
+		if !ok {
+			return fmt.Errorf("unknown XLSX column %q", name)
+		}
+		colName, err := excelize.ColumnNumberToName(colIdx)
+		if err != nil {
+			return err
+		}
+		if err := f.SetColWidth(sheetName, colName, colName, width); err != nil {
+			return err
+		}
+	}
+
+	dataStart := 1
+	if cfg.writeHeader {
+		dataStart = 2
+	}
+	for name, format := range cfg.xlsxNumberFormats {
+		colIdx, ok := nameToIndex[name]
+		if !ok {
+			return fmt.Errorf("unknown XLSX column %q", name)
+		}
+		if df.Nrow() == 0 {
+			continue
+		}
+		startCell, err := excelize.CoordinatesToCellName(colIdx, dataStart)
+		if err != nil {
+			return err
+		}
+		endCell, err := excelize.CoordinatesToCellName(colIdx, dataStart+df.Nrow()-1)
+		if err != nil {
+			return err
+		}
+		numberFormat := format
+		styleID, err := f.NewStyle(&excelize.Style{CustomNumFmt: &numberFormat})
+		if err != nil {
+			return err
+		}
+		if err := f.SetCellStyle(sheetName, startCell, endCell, styleID); err != nil {
+			return err
 		}
 	}
 	return nil

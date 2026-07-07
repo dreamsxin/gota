@@ -2362,6 +2362,15 @@ type writeOptions struct {
 
 	// Specifies the XLSX sheet name when writing Excel files
 	sheetName string
+
+	// Specifies whether XLSX headers should be written in bold
+	xlsxBoldHeader bool
+
+	// Specifies XLSX column widths by DataFrame column name
+	xlsxColumnWidths map[string]float64
+
+	// Specifies XLSX custom number formats by DataFrame column name
+	xlsxNumberFormats map[string]string
 }
 
 // WriteHeader sets the writeHeader option for writeOptions.
@@ -2375,6 +2384,27 @@ func WriteHeader(b bool) WriteOption {
 func WithSheetName(name string) WriteOption {
 	return func(c *writeOptions) {
 		c.sheetName = name
+	}
+}
+
+// WithXLSXBoldHeader writes the XLSX header row in bold.
+func WithXLSXBoldHeader(b bool) WriteOption {
+	return func(c *writeOptions) {
+		c.xlsxBoldHeader = b
+	}
+}
+
+// WithXLSXColumnWidths sets XLSX column widths by DataFrame column name.
+func WithXLSXColumnWidths(widths map[string]float64) WriteOption {
+	return func(c *writeOptions) {
+		c.xlsxColumnWidths = widths
+	}
+}
+
+// WithXLSXNumberFormats sets XLSX custom number formats by DataFrame column name.
+func WithXLSXNumberFormats(formats map[string]string) WriteOption {
+	return func(c *writeOptions) {
+		c.xlsxNumberFormats = formats
 	}
 }
 

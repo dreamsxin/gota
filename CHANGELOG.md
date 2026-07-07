@@ -13,6 +13,7 @@ This document follows
 - `ReadXLSXSheets` / `ReadXLSXFileSheets`: read every XLSX sheet into `map[string]DataFrame`, similar to pandas `read_excel(sheet_name=None)`.
 - `ReadParquet` / `ReadParquetFile` and `WriteParquet` / `WriteParquetFile` for basic Parquet round-trips using `github.com/parquet-go/parquet-go`.
 - `WriteSQL`: `WithUpsert(...)` and `WithUpsertUpdateColumns(...)` for SQLite/PostgreSQL `ON CONFLICT` upserts.
+- `WriteXLSX`: style options for bold headers, column widths and per-column custom number formats.
 
 ## [2.3.0] - 2026-04-04
 

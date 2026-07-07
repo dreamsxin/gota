@@ -107,7 +107,7 @@ Status markers: ✅ done · 🔧 partial / needs polish · ❌ not started
 - ✅ Parquet read/write (`github.com/parquet-go/parquet-go`)
 - ✅ `WriteSQL`: support `ON CONFLICT` / `UPSERT` for PostgreSQL and SQLite
 - ✅ `ReadCSV` / `ScanCSV`: auto-detect delimiter (comma, tab, semicolon, pipe)
-- ❌ `WriteXLSX`: cell formatting options (number format, bold header, column width)
+- ✅ `WriteXLSX`: cell formatting options (number format, bold header, column width)
 - ✅ `ReadXLSXSheets` / `ReadXLSXFileSheets`: read all sheets at once → `map[string]DataFrame`
 
 ### v2.5 — Type System

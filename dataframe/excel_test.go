@@ -2,10 +2,12 @@ package dataframe
 
 import (
 	"bytes"
+	"math"
 	"reflect"
 	"testing"
 
 	"github.com/dreamsxin/gota/series"
+	"github.com/xuri/excelize/v2"
 )
 
 // TestExcel_RoundTrip writes a DataFrame to an in-memory XLSX buffer and reads
@@ -97,5 +99,60 @@ func TestWriteXLSX_WithSheetName(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Records(), df.Records()) {
 		t.Errorf("named sheet records: got %v want %v", got.Records(), df.Records())
+	}
+}
+
+func TestWriteXLSX_StyleOptions(t *testing.T) {
+	df := New(
+		series.New([]string{"Alice", "Bob"}, series.String, "name"),
+		series.New([]float64{1234.5, 67.89}, series.Float, "amount"),
+	)
+
+	var buf bytes.Buffer
+	err := df.WriteXLSX(&buf,
+		WithXLSXBoldHeader(true),
+		WithXLSXColumnWidths(map[string]float64{"name": 18, "amount": 14}),
+		WithXLSXNumberFormats(map[string]string{"amount": "#,##0.00"}),
+	)
+	if err != nil {
+		t.Fatalf("WriteXLSX styles: %v", err)
+	}
+
+	xl, err := excelize.OpenReader(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatalf("open xlsx: %v", err)
+	}
+	defer xl.Close()
+
+	headerStyleID, err := xl.GetCellStyle("Sheet1", "A1")
+	if err != nil {
+		t.Fatalf("header style: %v", err)
+	}
+	headerStyle, err := xl.GetStyle(headerStyleID)
+	if err != nil {
+		t.Fatalf("get header style: %v", err)
+	}
+	if headerStyle.Font == nil || !headerStyle.Font.Bold {
+		t.Fatalf("header style bold: got %#v", headerStyle.Font)
+	}
+
+	width, err := xl.GetColWidth("Sheet1", "A")
+	if err != nil {
+		t.Fatalf("column width: %v", err)
+	}
+	if math.Abs(width-18) > 0.01 {
+		t.Fatalf("column width: got %v want 18", width)
+	}
+
+	amountStyleID, err := xl.GetCellStyle("Sheet1", "B2")
+	if err != nil {
+		t.Fatalf("amount style: %v", err)
+	}
+	amountStyle, err := xl.GetStyle(amountStyleID)
+	if err != nil {
+		t.Fatalf("get amount style: %v", err)
+	}
+	if amountStyle.CustomNumFmt == nil || *amountStyle.CustomNumFmt != "#,##0.00" {
+		t.Fatalf("number format: got %#v", amountStyle.CustomNumFmt)
 	}
 }
