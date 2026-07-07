@@ -29,6 +29,7 @@ methods for Go, inspired by pandas. The API is still evolving so
   - [Correlation & Covariance](#correlation--covariance-dataframe)
   - [Melt (wide → long)](#melt-wide--long)
   - [Excel I/O](#excel-io)
+  - [Parquet I/O](#parquet-io)
   - [SQL I/O](#sql-io)
   - [Index & MultiIndex](#index--multiindex)
   - [Chaining operations](#chaining-operations)
@@ -77,6 +78,7 @@ Requires Go 1.24+. Key dependencies:
 |---|---|
 | `gonum.org/v1/gonum` | Numeric operations |
 | `github.com/xuri/excelize/v2` | Excel I/O (no CGO) |
+| `github.com/parquet-go/parquet-go` | Parquet I/O |
 | `modernc.org/sqlite` | SQL tests (pure Go SQLite) |
 | `github.com/olekukonko/tablewriter` | Table formatting |
 
@@ -402,6 +404,19 @@ sheets, err := dataframe.ReadXLSXSheets(r) // map[string]DataFrame, one per shee
 // Write
 err := df.WriteXLSX(w)
 err := df.WriteXLSXFile("output.xlsx")
+```
+
+### Parquet I/O
+
+Uses [parquet-go](https://github.com/parquet-go/parquet-go). Supports Gota
+`String`, `Int`, `Float`, `Bool` and `Time` columns.
+
+```go
+err := df.WriteParquet(w)
+err := df.WriteParquetFile("data.parquet")
+
+df := dataframe.ReadParquet(readerAt, size)
+df := dataframe.ReadParquetFile("data.parquet")
 ```
 
 ### SQL I/O

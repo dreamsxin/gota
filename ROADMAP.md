@@ -104,7 +104,7 @@ Status markers: ✅ done · 🔧 partial / needs polish · ❌ not started
 - ✅ Parallel `Arrange` for large DataFrames (parallel merge-sort, threshold 100k rows)
 
 ### v2.4 — I/O & Interop
-- ❌ Parquet read/write (`github.com/parquet-go/parquet-go`)
+- ✅ Parquet read/write (`github.com/parquet-go/parquet-go`)
 - ❌ `WriteSQL`: support `ON CONFLICT` / `UPSERT` for PostgreSQL and SQLite
 - ✅ `ReadCSV` / `ScanCSV`: auto-detect delimiter (comma, tab, semicolon, pipe)
 - ❌ `WriteXLSX`: cell formatting options (number format, bold header, column width)
