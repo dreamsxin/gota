@@ -25,7 +25,7 @@ func WithSheet(name string) LoadOption {
 }
 
 // ReadXLSX reads the first (or named) sheet of an XLSX file from r and
-// returns a DataFrame.  The first row is used as column headers by default.
+// returns a DataFrame. The first row is used as column headers by default.
 //
 // Options:
 //   - HasHeader(bool)     – whether the first row contains column names (default true)
@@ -59,6 +59,10 @@ func ReadXLSX(r io.Reader, options ...LoadOption) DataFrame {
 		sheetName = sheets[0]
 	}
 
+	return readXLSXSheet(f, sheetName, options...)
+}
+
+func readXLSXSheet(f *excelize.File, sheetName string, options ...LoadOption) DataFrame {
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
 		return DataFrame{Err: fmt.Errorf("ReadXLSX: %v", err)}
@@ -83,6 +87,31 @@ func ReadXLSX(r io.Reader, options ...LoadOption) DataFrame {
 	return LoadRecords(rows, options...)
 }
 
+// ReadXLSXSheets reads every sheet in an XLSX file into a map keyed by sheet
+// name. This mirrors pandas read_excel(sheet_name=None).
+func ReadXLSXSheets(r io.Reader, options ...LoadOption) (map[string]DataFrame, error) {
+	f, err := excelize.OpenReader(r)
+	if err != nil {
+		return nil, fmt.Errorf("ReadXLSXSheets: %v", err)
+	}
+	defer f.Close()
+
+	sheets := f.GetSheetList()
+	if len(sheets) == 0 {
+		return nil, fmt.Errorf("ReadXLSXSheets: workbook has no sheets")
+	}
+
+	out := make(map[string]DataFrame, len(sheets))
+	for _, sheetName := range sheets {
+		df := readXLSXSheet(f, sheetName, options...)
+		if df.Err != nil {
+			return nil, fmt.Errorf("ReadXLSXSheets: sheet %q: %v", sheetName, df.Err)
+		}
+		out[sheetName] = df
+	}
+	return out, nil
+}
+
 // WriteXLSX writes the DataFrame to w as an XLSX file.  The first row
 // contains the column headers.
 //
@@ -101,7 +130,16 @@ func (df DataFrame) WriteXLSX(w io.Writer, options ...WriteOption) error {
 	f := excelize.NewFile()
 	defer f.Close()
 
-	sheetName := "Sheet1"
+	sheetName := cfg.sheetName
+	if sheetName == "" {
+		sheetName = "Sheet1"
+	}
+	if sheetName != "Sheet1" {
+		if err := f.SetSheetName("Sheet1", sheetName); err != nil {
+			return fmt.Errorf("WriteXLSX: sheet name: %v", err)
+		}
+	}
+
 	records := df.Records() // first row is header
 	startRow := 0
 	if !cfg.writeHeader {
@@ -134,6 +172,17 @@ func ReadXLSXFile(path string, options ...LoadOption) DataFrame {
 	return ReadXLSX(f, options...)
 }
 
+// ReadXLSXFileSheets is a convenience wrapper that opens a file path and calls
+// ReadXLSXSheets.
+func ReadXLSXFileSheets(path string, options ...LoadOption) (map[string]DataFrame, error) {
+	f, err := openFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("ReadXLSXFileSheets: %v", err)
+	}
+	defer f.Close()
+	return ReadXLSXSheets(f, options...)
+}
+
 // WriteXLSXFile is a convenience wrapper that creates/truncates a file and calls WriteXLSX.
 func (df DataFrame) WriteXLSXFile(path string, options ...WriteOption) error {
 	f, err := createFile(path)
@@ -154,7 +203,10 @@ func (df DataFrame) WriteXLSXFile(path string, options ...WriteOption) error {
 //	df1.WriteXLSXSheet(f, "Sales")
 //	df2.WriteXLSXSheet(f, "Inventory")
 //	f.SaveAs("report.xlsx")
-func (df DataFrame) WriteXLSXSheet(f interface{ SetCellValue(string, string, interface{}) error; NewSheet(string) (int, error) }, sheetName string, options ...WriteOption) error {
+func (df DataFrame) WriteXLSXSheet(f interface {
+	SetCellValue(string, string, interface{}) error
+	NewSheet(string) (int, error)
+}, sheetName string, options ...WriteOption) error {
 	if df.Err != nil {
 		return df.Err
 	}

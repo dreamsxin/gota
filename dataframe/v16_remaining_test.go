@@ -206,6 +206,24 @@ func TestScanCSV_ZeroBatchSize(t *testing.T) {
 	}
 }
 
+func TestScanCSV_DetectDelimiter(t *testing.T) {
+	csv := "name;age\nalice;30\nbob;25\ncarol;35\n"
+	var names []string
+	err := ScanCSV(strings.NewReader(csv), 2, func(batch DataFrame) error {
+		for i := 0; i < batch.Nrow(); i++ {
+			names = append(names, batch.Col("name").Elem(i).String())
+		}
+		return nil
+	}, DetectDelimiter(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"alice", "bob", "carol"}
+	if !reflect.DeepEqual(names, want) {
+		t.Errorf("ScanCSV DetectDelimiter names: got %v want %v", names, want)
+	}
+}
+
 // -----------------------------------------------------------------------
 // v1.3 — DataFrame.Query
 // -----------------------------------------------------------------------

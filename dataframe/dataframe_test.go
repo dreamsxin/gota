@@ -1421,6 +1421,54 @@ Spain,2012-02-01,66,555.42,00241
 	}
 }
 
+func TestReadCSV_DetectDelimiter(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  [][]string
+	}{
+		{
+			"semicolon",
+			"city;score\nParis;10\nLyon;12\n",
+			[][]string{{"city", "score"}, {"Paris", "10"}, {"Lyon", "12"}},
+		},
+		{
+			"tab",
+			"city\tscore\nParis\t10\nLyon\t12\n",
+			[][]string{{"city", "score"}, {"Paris", "10"}, {"Lyon", "12"}},
+		},
+		{
+			"pipe",
+			"city|score\nParis|10\nLyon|12\n",
+			[][]string{{"city", "score"}, {"Paris", "10"}, {"Lyon", "12"}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			df := ReadCSV(strings.NewReader(test.input), DetectDelimiter(true))
+			if df.Err != nil {
+				t.Fatalf("ReadCSV DetectDelimiter: %v", df.Err)
+			}
+			if got := df.Records(); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("ReadCSV DetectDelimiter records: got %v want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestReadCSV_DetectDelimiter_ExplicitDelimiterWins(t *testing.T) {
+	input := "city;score\nParis;10\n"
+	df := ReadCSV(strings.NewReader(input), DetectDelimiter(true), WithDelimiter(';'))
+	if df.Err != nil {
+		t.Fatalf("ReadCSV explicit delimiter: %v", df.Err)
+	}
+	want := [][]string{{"city", "score"}, {"Paris", "10"}}
+	if got := df.Records(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ReadCSV explicit delimiter records: got %v want %v", got, want)
+	}
+}
+
 func TestReadJSON(t *testing.T) {
 	table := []struct {
 		jsonStr string

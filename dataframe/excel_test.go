@@ -82,3 +82,20 @@ func TestExcel_WriteReadHeaders(t *testing.T) {
 		t.Errorf("Header not preserved; names: %v", got.Names())
 	}
 }
+
+func TestWriteXLSX_WithSheetName(t *testing.T) {
+	df := New(series.New([]string{"a", "b"}, series.String, "name"))
+
+	var buf bytes.Buffer
+	if err := df.WriteXLSX(&buf, WithSheetName("Data")); err != nil {
+		t.Fatalf("WriteXLSX WithSheetName: %v", err)
+	}
+
+	got := ReadXLSX(bytes.NewReader(buf.Bytes()), WithSheet("Data"))
+	if got.Err != nil {
+		t.Fatalf("ReadXLSX named sheet: %v", got.Err)
+	}
+	if !reflect.DeepEqual(got.Records(), df.Records()) {
+		t.Errorf("named sheet records: got %v want %v", got.Records(), df.Records())
+	}
+}

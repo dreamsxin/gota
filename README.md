@@ -162,6 +162,9 @@ From CSV / JSON readers:
 ```go
 df := dataframe.ReadCSV(strings.NewReader(csvStr))
 df := dataframe.ReadJSON(strings.NewReader(jsonStr))
+
+// Infer comma, tab, semicolon or pipe delimiters.
+df := dataframe.ReadCSV(strings.NewReader(tsvOrCsv), dataframe.DetectDelimiter(true))
 ```
 
 From HTML tables:
@@ -394,6 +397,7 @@ df := dataframe.ReadXLSXFile("data.xlsx",
     dataframe.HasHeader(true),
     dataframe.WithTypes(map[string]series.Type{"price": series.Float}),
 )
+sheets, err := dataframe.ReadXLSXSheets(r) // map[string]DataFrame, one per sheet
 
 // Write
 err := df.WriteXLSX(w)
@@ -930,7 +934,7 @@ err := df.WriteSQL(msDB, "users",
 err := dataframe.ScanCSV(f, 1000, func(batch dataframe.DataFrame) error {
     // process 1000-row batch
     return nil
-})
+}, dataframe.DetectDelimiter(true))
 ```
 
 ---

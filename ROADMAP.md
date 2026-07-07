@@ -106,9 +106,9 @@ Status markers: ✅ done · 🔧 partial / needs polish · ❌ not started
 ### v2.4 — I/O & Interop
 - ❌ Parquet read/write (`github.com/parquet-go/parquet-go`)
 - ❌ `WriteSQL`: support `ON CONFLICT` / `UPSERT` for PostgreSQL and SQLite
-- ❌ `ReadCSV` / `ScanCSV`: auto-detect delimiter (comma, tab, semicolon, pipe)
+- ✅ `ReadCSV` / `ScanCSV`: auto-detect delimiter (comma, tab, semicolon, pipe)
 - ❌ `WriteXLSX`: cell formatting options (number format, bold header, column width)
-- ❌ `ReadXLSX`: read all sheets at once → `map[string]DataFrame`
+- ✅ `ReadXLSXSheets` / `ReadXLSXFileSheets`: read all sheets at once → `map[string]DataFrame`
 
 ### v2.5 — Type System
 - ❌ Nullable typed columns (`NullableInt`, `NullableFloat`) without boxing every element

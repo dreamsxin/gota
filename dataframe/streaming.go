@@ -43,8 +43,12 @@ func ScanCSV(r io.Reader, batchSize int, fn func(DataFrame) error, options ...Lo
 		opt(&cfg)
 	}
 
-	csvReader := csv.NewReader(r)
-	csvReader.Comma = cfg.delimiter
+	prepared, delimiter, err := prepareCSVReader(r, cfg)
+	if err != nil {
+		return fmt.Errorf("ScanCSV: %v", err)
+	}
+	csvReader := csv.NewReader(prepared)
+	csvReader.Comma = delimiter
 	csvReader.LazyQuotes = cfg.lazyQuotes
 	csvReader.Comment = cfg.comment
 
@@ -357,8 +361,6 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 	}
 	return result, nil
 }
-
-
 
 // wordBoundaryIndex returns the byte index of word (case-insensitive) in s,
 // requiring it to be surrounded by spaces or string boundaries.

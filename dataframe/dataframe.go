@@ -3,6 +3,7 @@
 package dataframe
 
 import (
+	"bufio"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -1808,6 +1809,13 @@ type loadOptions struct {
 	// Defines the csv delimiter
 	delimiter rune
 
+	// If set, ReadCSV/ScanCSV infer the delimiter from an input sample.
+	detectDelimiter bool
+
+	// Tracks whether delimiter was explicitly set. Manual delimiters take
+	// precedence over auto-detection.
+	delimiterSet bool
+
 	// EnablesLazyQuotes
 	lazyQuotes bool
 
@@ -1873,7 +1881,77 @@ func WithTypes(coltypes map[string]series.Type) LoadOption {
 func WithDelimiter(b rune) LoadOption {
 	return func(c *loadOptions) {
 		c.delimiter = b
+		c.delimiterSet = true
 	}
+}
+
+// DetectDelimiter enables CSV delimiter inference for ReadCSV and ScanCSV.
+// Candidate delimiters are comma, tab, semicolon and pipe. If WithDelimiter is
+// also provided, the explicit delimiter takes precedence.
+func DetectDelimiter(b bool) LoadOption {
+	return func(c *loadOptions) {
+		c.detectDelimiter = b
+	}
+}
+
+func prepareCSVReader(r io.Reader, cfg loadOptions) (io.Reader, rune, error) {
+	delimiter := cfg.delimiter
+	if cfg.detectDelimiter && !cfg.delimiterSet {
+		buf := bufio.NewReader(r)
+		sample, err := buf.Peek(64 * 1024)
+		if err != nil && err != io.EOF && len(sample) == 0 {
+			return nil, delimiter, err
+		}
+		delimiter = inferCSVDelimiter(sample, cfg)
+		return buf, delimiter, nil
+	}
+	return r, delimiter, nil
+}
+
+func inferCSVDelimiter(sample []byte, cfg loadOptions) rune {
+	candidates := []rune{',', '\t', ';', '|'}
+	best := cfg.delimiter
+	bestScore := -1
+	bestFields := 0
+
+	for _, candidate := range candidates {
+		reader := csv.NewReader(strings.NewReader(string(sample)))
+		reader.Comma = candidate
+		reader.LazyQuotes = cfg.lazyQuotes
+		reader.Comment = cfg.comment
+		reader.FieldsPerRecord = -1
+
+		records, err := reader.ReadAll()
+		if err != nil {
+			continue
+		}
+
+		score, fields := delimiterScore(records)
+		if score > bestScore || (score == bestScore && fields > bestFields) {
+			best = candidate
+			bestScore = score
+			bestFields = fields
+		}
+	}
+	return best
+}
+
+func delimiterScore(records [][]string) (score, fields int) {
+	counts := make(map[int]int)
+	for _, record := range records {
+		if len(record) <= 1 {
+			continue
+		}
+		counts[len(record)]++
+	}
+	for fieldCount, seen := range counts {
+		current := seen * fieldCount
+		if current > score || (current == score && fieldCount > fields) {
+			score = current
+			fields = fieldCount
+		}
+	}
+	return score, fields
 }
 
 // WithLazyQuotes sets csv parsing option to LazyQuotes
@@ -2237,7 +2315,6 @@ func LoadMatrix(mat Matrix) DataFrame {
 // ReadCSV reads a CSV file from a io.Reader and builds a DataFrame with the
 // resulting records.
 func ReadCSV(r io.Reader, options ...LoadOption) DataFrame {
-	csvReader := csv.NewReader(r)
 	cfg := loadOptions{
 		delimiter:  ',',
 		lazyQuotes: false,
@@ -2247,7 +2324,12 @@ func ReadCSV(r io.Reader, options ...LoadOption) DataFrame {
 		option(&cfg)
 	}
 
-	csvReader.Comma = cfg.delimiter
+	prepared, delimiter, err := prepareCSVReader(r, cfg)
+	if err != nil {
+		return DataFrame{Err: err}
+	}
+	csvReader := csv.NewReader(prepared)
+	csvReader.Comma = delimiter
 	csvReader.LazyQuotes = cfg.lazyQuotes
 	csvReader.Comment = cfg.comment
 
@@ -2277,12 +2359,22 @@ type WriteOption func(*writeOptions)
 type writeOptions struct {
 	// Specifies whether the header is also written
 	writeHeader bool
+
+	// Specifies the XLSX sheet name when writing Excel files
+	sheetName string
 }
 
 // WriteHeader sets the writeHeader option for writeOptions.
 func WriteHeader(b bool) WriteOption {
 	return func(c *writeOptions) {
 		c.writeHeader = b
+	}
+}
+
+// WithSheetName sets the sheet name used by WriteXLSX and WriteXLSXFile.
+func WithSheetName(name string) WriteOption {
+	return func(c *writeOptions) {
+		c.sheetName = name
 	}
 }
 

@@ -117,6 +117,34 @@ func TestWriteXLSXMultiSheet_Empty(t *testing.T) {
 	}
 }
 
+func TestReadXLSXSheets(t *testing.T) {
+	df1 := New(series.New([]string{"a", "b"}, series.String, "name"))
+	df2 := New(series.New([]int{1, 2, 3}, series.Int, "value"))
+
+	var buf bytes.Buffer
+	err := WriteXLSXMultiSheet(&buf,
+		SheetData{"Names", df1},
+		SheetData{"Values", df2},
+	)
+	if err != nil {
+		t.Fatalf("WriteXLSXMultiSheet: %v", err)
+	}
+
+	sheets, err := ReadXLSXSheets(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatalf("ReadXLSXSheets: %v", err)
+	}
+	if len(sheets) != 2 {
+		t.Fatalf("ReadXLSXSheets count: got %d want 2", len(sheets))
+	}
+	if got := sheets["Names"].Records(); !recordsEqual(got, df1.Records()) {
+		t.Errorf("Names sheet records: got %v want %v", got, df1.Records())
+	}
+	if got := sheets["Values"].Records(); !recordsEqual(got, df2.Records()) {
+		t.Errorf("Values sheet records: got %v want %v", got, df2.Records())
+	}
+}
+
 // -----------------------------------------------------------------------
 // Benchmarks for new features
 // -----------------------------------------------------------------------
