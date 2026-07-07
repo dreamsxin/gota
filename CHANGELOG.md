@@ -12,6 +12,7 @@ This document follows
 - `ReadCSV` / `ScanCSV`: optional delimiter auto-detection via `DetectDelimiter(true)` for comma, tab, semicolon and pipe-delimited files.
 - `ReadXLSXSheets` / `ReadXLSXFileSheets`: read every XLSX sheet into `map[string]DataFrame`, similar to pandas `read_excel(sheet_name=None)`.
 - `ReadParquet` / `ReadParquetFile` and `WriteParquet` / `WriteParquetFile` for basic Parquet round-trips using `github.com/parquet-go/parquet-go`.
+- `WriteSQL`: `WithUpsert(...)` and `WithUpsertUpdateColumns(...)` for SQLite/PostgreSQL `ON CONFLICT` upserts.
 
 ## [2.3.0] - 2026-04-04
 

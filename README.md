@@ -436,6 +436,12 @@ err := df.WriteSQL(db, "users",
     dataframe.WithTruncateFirst(true), // DELETE FROM before inserting
     dataframe.WithBatchSize(200),      // rows per INSERT (default 500)
 )
+
+// SQLite / PostgreSQL upsert on unique or primary-key columns.
+err := df.WriteSQL(db, "users",
+    dataframe.WithUpsert("id"),
+    dataframe.WithUpsertUpdateColumns("name", "score"),
+)
 ```
 
 SQL ↔ Series type mapping:

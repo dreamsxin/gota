@@ -232,3 +232,99 @@ func TestWriteSQL_BatchSize(t *testing.T) {
 		t.Errorf("WriteSQL batch count: got %d want 10", count)
 	}
 }
+
+func TestWriteSQL_UpsertSQLite(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	_, err := db.Exec(`CREATE TABLE people (
+		id INTEGER PRIMARY KEY,
+		name TEXT,
+		score REAL
+	)`)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	initial := New(
+		series.New([]int{1, 2}, series.Int, "id"),
+		series.New([]string{"Alice", "Bob"}, series.String, "name"),
+		series.New([]float64{9.5, 8.0}, series.Float, "score"),
+	)
+	if err := initial.WriteSQL(db, "people"); err != nil {
+		t.Fatalf("initial WriteSQL: %v", err)
+	}
+
+	update := New(
+		series.New([]int{2, 3}, series.Int, "id"),
+		series.New([]string{"Bobby", "Carol"}, series.String, "name"),
+		series.New([]float64{8.8, 7.5}, series.Float, "score"),
+	)
+	if err := update.WriteSQL(db, "people", WithUpsert("id")); err != nil {
+		t.Fatalf("upsert WriteSQL: %v", err)
+	}
+
+	rows, err := db.Query("SELECT id, name, score FROM people ORDER BY id")
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	got := FromSQL(rows)
+	if got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	want := [][]string{
+		{"id", "name", "score"},
+		{"1", "Alice", "9.500000"},
+		{"2", "Bobby", "8.800000"},
+		{"3", "Carol", "7.500000"},
+	}
+	if records := got.Records(); !recordsEqual(records, want) {
+		t.Fatalf("upsert records: got %v want %v", records, want)
+	}
+}
+
+func TestWriteSQL_UpsertUpdateColumns(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	_, err := db.Exec(`CREATE TABLE people (
+		id INTEGER PRIMARY KEY,
+		name TEXT,
+		score REAL
+	)`)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO people VALUES (1, 'Alice', 9.5)`); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	update := New(
+		series.New([]int{1}, series.Int, "id"),
+		series.New([]string{"Alicia"}, series.String, "name"),
+		series.New([]float64{10.0}, series.Float, "score"),
+	)
+	if err := update.WriteSQL(db, "people", WithUpsert("id"), WithUpsertUpdateColumns("score")); err != nil {
+		t.Fatalf("upsert WriteSQL: %v", err)
+	}
+
+	var name string
+	var score float64
+	if err := db.QueryRow("SELECT name, score FROM people WHERE id = 1").Scan(&name, &score); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if name != "Alice" || score != 10.0 {
+		t.Fatalf("upsert selected columns: got name=%s score=%v", name, score)
+	}
+}
+
+func TestWriteSQL_UpsertMissingConflictColumn(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	df := New(series.New([]int{1}, series.Int, "id"))
+	err := df.WriteSQL(db, "items", WithCreateTable(true), WithUpsert("missing"))
+	if err == nil {
+		t.Fatal("expected missing conflict column error")
+	}
+}

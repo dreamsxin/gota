@@ -114,6 +114,8 @@ type sqlInsertOptions struct {
 	createTable      bool                // create the table if it doesn't exist
 	truncateFirst    bool                // TRUNCATE / DELETE FROM before inserting
 	placeholderStyle SQLPlaceholderStyle // placeholder syntax (default ?)
+	upsertConflict   []string            // conflict target columns for ON CONFLICT
+	upsertUpdate     []string            // columns to update on conflict
 }
 
 // WithBatchSize sets how many rows are inserted per statement.
@@ -139,6 +141,23 @@ func WithTruncateFirst(b bool) SQLInsertOption {
 //	err := df.WriteSQL(pgDB, "users", dataframe.WithPlaceholderStyle(dataframe.SQLPlaceholderDollar))
 func WithPlaceholderStyle(style SQLPlaceholderStyle) SQLInsertOption {
 	return func(o *sqlInsertOptions) { o.placeholderStyle = style }
+}
+
+// WithUpsert enables ON CONFLICT upsert support for SQLite and PostgreSQL.
+// conflictColumns defines the conflict target. By default all non-conflict
+// DataFrame columns are updated from excluded values.
+func WithUpsert(conflictColumns ...string) SQLInsertOption {
+	return func(o *sqlInsertOptions) {
+		o.upsertConflict = append([]string(nil), conflictColumns...)
+	}
+}
+
+// WithUpsertUpdateColumns selects which columns are updated when WithUpsert
+// finds an existing row. If omitted, all non-conflict columns are updated.
+func WithUpsertUpdateColumns(updateColumns ...string) SQLInsertOption {
+	return func(o *sqlInsertOptions) {
+		o.upsertUpdate = append([]string(nil), updateColumns...)
+	}
 }
 
 // buildPlaceholder returns the placeholder string for position pos (1-based).
@@ -195,9 +214,13 @@ func (df DataFrame) WriteSQL(db *sql.DB, tableName string, opts ...SQLInsertOpti
 	// Build quoted column list.
 	quotedCols := make([]string, ncols)
 	for i, n := range colNames {
-		quotedCols[i] = fmt.Sprintf(`"%s"`, n)
+		quotedCols[i] = quoteSQLIdentifier(n)
 	}
 	colList := strings.Join(quotedCols, ", ")
+	upsertClause, err := buildSQLUpsertClause(colNames, cfg)
+	if err != nil {
+		return err
+	}
 
 	// Build per-row placeholder group, e.g. (?,?,?) or ($1,$2,$3).
 	buildRowPlaceholders := func(rowOffset int) string {
@@ -224,8 +247,8 @@ func (df DataFrame) WriteSQL(db *sql.DB, tableName string, opts ...SQLInsertOpti
 		for i := range batch {
 			allPlaceholders[i] = buildRowPlaceholders(i)
 		}
-		stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s",
-			tableName, colList, strings.Join(allPlaceholders, ", "))
+		stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s%s",
+			tableName, colList, strings.Join(allPlaceholders, ", "), upsertClause)
 
 		args := make([]interface{}, 0, batchLen*ncols)
 		for _, row := range batch {
@@ -248,7 +271,7 @@ func (df DataFrame) WriteSQL(db *sql.DB, tableName string, opts ...SQLInsertOpti
 func buildCreateTable(tableName string, colNames []string, colTypes []series.Type) string {
 	cols := make([]string, len(colNames))
 	for i, n := range colNames {
-		cols[i] = fmt.Sprintf(`"%s" %s`, n, seriesTypeToSQL(colTypes[i]))
+		cols[i] = fmt.Sprintf("%s %s", quoteSQLIdentifier(n), seriesTypeToSQL(colTypes[i]))
 	}
 	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s)", tableName, strings.Join(cols, ", "))
 }
@@ -266,4 +289,58 @@ func seriesTypeToSQL(t series.Type) string {
 	default:
 		return "TEXT"
 	}
+}
+
+func buildSQLUpsertClause(colNames []string, cfg sqlInsertOptions) (string, error) {
+	if len(cfg.upsertConflict) == 0 {
+		return "", nil
+	}
+
+	colSet := make(map[string]struct{}, len(colNames))
+	for _, name := range colNames {
+		colSet[name] = struct{}{}
+	}
+	for _, name := range cfg.upsertConflict {
+		if _, ok := colSet[name]; !ok {
+			return "", fmt.Errorf("WriteSQL: upsert conflict column %q not found", name)
+		}
+	}
+
+	updateColumns := cfg.upsertUpdate
+	if len(updateColumns) == 0 {
+		conflictSet := make(map[string]struct{}, len(cfg.upsertConflict))
+		for _, name := range cfg.upsertConflict {
+			conflictSet[name] = struct{}{}
+		}
+		for _, name := range colNames {
+			if _, conflict := conflictSet[name]; !conflict {
+				updateColumns = append(updateColumns, name)
+			}
+		}
+	}
+	for _, name := range updateColumns {
+		if _, ok := colSet[name]; !ok {
+			return "", fmt.Errorf("WriteSQL: upsert update column %q not found", name)
+		}
+	}
+
+	conflictCols := make([]string, len(cfg.upsertConflict))
+	for i, name := range cfg.upsertConflict {
+		conflictCols[i] = quoteSQLIdentifier(name)
+	}
+	if len(updateColumns) == 0 {
+		return fmt.Sprintf(" ON CONFLICT (%s) DO NOTHING", strings.Join(conflictCols, ", ")), nil
+	}
+
+	assignments := make([]string, len(updateColumns))
+	for i, name := range updateColumns {
+		quoted := quoteSQLIdentifier(name)
+		assignments[i] = fmt.Sprintf("%s = excluded.%s", quoted, quoted)
+	}
+	return fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s",
+		strings.Join(conflictCols, ", "), strings.Join(assignments, ", ")), nil
+}
+
+func quoteSQLIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
