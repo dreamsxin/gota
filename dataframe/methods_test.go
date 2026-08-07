@@ -92,7 +92,7 @@ func TestDataFrame_Info(t *testing.T) {
 	df.Info(&buf)
 
 	output := buf.String()
-	
+
 	// Check output contains expected information
 	if !strings.Contains(output, "3 entries") {
 		t.Errorf("Info should contain row count")
@@ -118,7 +118,7 @@ func TestDataFrame_IsNull(t *testing.T) {
 	})
 
 	mask := df.IsNull()
-	
+
 	if mask.Nrow() != 3 || mask.Ncol() != 2 {
 		t.Errorf("IsNull should return same dimensions")
 	}
@@ -145,7 +145,7 @@ func TestDataFrame_NotNull(t *testing.T) {
 	})
 
 	mask := df.NotNull()
-	
+
 	// Check [0,0] is true (non-NaN value)
 	val, _ := mask.Elem(0, 0).Bool()
 	if !val {
@@ -175,7 +175,7 @@ func TestDataFrame_ValueCounts(t *testing.T) {
 
 	// Test count mode
 	vc := df.ValueCounts("A", false, false)
-	
+
 	if vc.Nrow() != 3 {
 		t.Errorf("Expected 3 unique values, got %d", vc.Nrow())
 	}
@@ -208,7 +208,7 @@ func TestDataFrame_NLargest(t *testing.T) {
 	})
 
 	top3 := df.NLargest(3, "B")
-	
+
 	if top3.Nrow() != 3 {
 		t.Errorf("Expected 3 rows, got %d", top3.Nrow())
 	}
@@ -229,7 +229,7 @@ func TestDataFrame_NSmallest(t *testing.T) {
 	})
 
 	bottom3 := df.NSmallest(3, "B")
-	
+
 	if bottom3.Nrow() != 3 {
 		t.Errorf("Expected 3 rows, got %d", bottom3.Nrow())
 	}
@@ -319,7 +319,7 @@ func TestDataFrame_Clip(t *testing.T) {
 
 	lower := 0.0
 	upper := 100.0
-	
+
 	clipped := df.Clip(&lower, &upper)
 
 	// Check values are clipped
@@ -343,7 +343,7 @@ func TestDataFrame_ClipColumn(t *testing.T) {
 
 	lower := 0.0
 	upper := 100.0
-	
+
 	clipped := df.ClipColumn("A", &lower, &upper)
 
 	// Check column A is clipped
@@ -443,7 +443,7 @@ func TestDataFrame_Between(t *testing.T) {
 
 	// Test inclusive bounds
 	mask := df.Between("B", 10, 20, "both")
-	
+
 	val, _ := mask.Elem(0).Bool()
 	if val {
 		t.Errorf("Expected 5 to be outside [10,20]")

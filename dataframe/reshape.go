@@ -26,10 +26,10 @@ const (
 
 // ResampleGroups is the result of a Resample call.
 type ResampleGroups struct {
-	groups  map[string]DataFrame
-	keyCol  string
-	freq    ResampleFreq
-	Err     error
+	groups map[string]DataFrame
+	keyCol string
+	freq   ResampleFreq
+	Err    error
 }
 
 // Resample groups rows by truncating the Time column colname to the given

@@ -19,7 +19,8 @@ import (
 // Similar to pandas head().
 //
 // Example:
-//   df.Head(5)  // First 5 rows
+//
+//	df.Head(5)  // First 5 rows
 func (df DataFrame) Head(n int) DataFrame {
 	if df.Err != nil {
 		return df
@@ -41,7 +42,8 @@ func (df DataFrame) Head(n int) DataFrame {
 // Similar to pandas tail().
 //
 // Example:
-//   df.Tail(5)  // Last 5 rows
+//
+//	df.Tail(5)  // Last 5 rows
 func (df DataFrame) Tail(n int) DataFrame {
 	if df.Err != nil {
 		return df
@@ -72,19 +74,19 @@ func (df DataFrame) Info(w io.Writer) {
 	if w == nil {
 		w = io.Discard
 	}
-	
+
 	if df.Err != nil {
 		fmt.Fprintf(w, "DataFrame error: %v\n", df.Err)
 		return
 	}
-	
+
 	types := df.Types()
 	colnames := df.Names()
-	
+
 	fmt.Fprintf(w, "<class 'dataframe.DataFrame'>\n")
 	fmt.Fprintf(w, "Index: %d entries, 0 to %d\n", df.nrows, df.nrows-1)
 	fmt.Fprintf(w, "Data columns (total %d columns):\n", df.ncols)
-	
+
 	// Calculate max column name length for formatting
 	maxNameLen := 0
 	for _, name := range colnames {
@@ -92,7 +94,7 @@ func (df DataFrame) Info(w io.Writer) {
 			maxNameLen = len(name)
 		}
 	}
-	
+
 	// Count non-null values per column and estimate memory in a single pass.
 	totalBytes := 0
 	for i, col := range df.columns {
@@ -118,7 +120,7 @@ func (df DataFrame) Info(w io.Writer) {
 		}
 		fmt.Fprintf(w, "   %-*s  %d non-null   %s\n", maxNameLen, colnames[i], nonNull, types[i])
 	}
-	
+
 	if totalBytes > 1024*1024 {
 		fmt.Fprintf(w, "memory usage: %.1f+ MB\n", float64(totalBytes)/(1024*1024))
 	} else if totalBytes > 1024 {
@@ -136,13 +138,14 @@ func (df DataFrame) Info(w io.Writer) {
 // Similar to pandas isnull().
 //
 // Example:
-//   mask := df.IsNull()
-//   // Returns DataFrame with true where values are NaN/missing
+//
+//	mask := df.IsNull()
+//	// Returns DataFrame with true where values are NaN/missing
 func (df DataFrame) IsNull() DataFrame {
 	if df.Err != nil {
 		return df
 	}
-	
+
 	columns := make([]series.Series, df.ncols)
 	for i, col := range df.columns {
 		bools := make([]bool, df.nrows)
@@ -152,7 +155,7 @@ func (df DataFrame) IsNull() DataFrame {
 		columns[i] = series.Bools(bools)
 		columns[i].Name = col.Name
 	}
-	
+
 	return New(columns...)
 }
 
@@ -166,13 +169,14 @@ func (df DataFrame) IsNA() DataFrame {
 // Similar to pandas notnull().
 //
 // Example:
-//   mask := df.NotNull()
-//   // Returns DataFrame with true where values are NOT NaN/missing
+//
+//	mask := df.NotNull()
+//	// Returns DataFrame with true where values are NOT NaN/missing
 func (df DataFrame) NotNull() DataFrame {
 	if df.Err != nil {
 		return df
 	}
-	
+
 	columns := make([]series.Series, df.ncols)
 	for i, col := range df.columns {
 		bools := make([]bool, df.nrows)
@@ -182,7 +186,7 @@ func (df DataFrame) NotNull() DataFrame {
 		columns[i] = series.Bools(bools)
 		columns[i].Name = col.Name
 	}
-	
+
 	return New(columns...)
 }
 
@@ -273,7 +277,8 @@ func (df DataFrame) ValueCounts(colname string, normalize bool, ascending bool) 
 // Similar to pandas nlargest().
 //
 // Example:
-//   df.NLargest(5, "price")  // Top 5 rows by price
+//
+//	df.NLargest(5, "price")  // Top 5 rows by price
 func (df DataFrame) NLargest(n int, colname string) DataFrame {
 	if df.Err != nil {
 		return df
@@ -285,7 +290,8 @@ func (df DataFrame) NLargest(n int, colname string) DataFrame {
 // Similar to pandas nsmallest().
 //
 // Example:
-//   df.NSmallest(5, "price")  // Bottom 5 rows by price
+//
+//	df.NSmallest(5, "price")  // Bottom 5 rows by price
 func (df DataFrame) NSmallest(n int, colname string) DataFrame {
 	if df.Err != nil {
 		return df
@@ -307,30 +313,31 @@ func (df DataFrame) NSmallest(n int, colname string) DataFrame {
 // - seed: random seed for reproducibility
 //
 // Example:
-//   df.Sample(10, -1, false, 42)   // 10 random rows
-//   df.Sample(-1, 0.1, false, 42)  // 10% of rows
+//
+//	df.Sample(10, -1, false, 42)   // 10 random rows
+//	df.Sample(-1, 0.1, false, 42)  // 10% of rows
 func (df DataFrame) Sample(n int, frac float64, replace bool, seed int64) DataFrame {
 	if df.Err != nil {
 		return df
 	}
-	
+
 	if n < 0 && frac <= 0 {
 		return DataFrame{Err: fmt.Errorf("sample: must specify n or frac")}
 	}
-	
+
 	// Determine sample size
 	sampleSize := n
 	if n < 0 {
 		sampleSize = int(float64(df.nrows) * frac)
 	}
-	
+
 	if sampleSize <= 0 {
 		return df.Subset([]int{})
 	}
-	
+
 	// Initialize random source
 	rng := rand.New(rand.NewSource(seed))
-	
+
 	// Generate random indexes
 	var indexes []int
 	if replace {
@@ -348,7 +355,7 @@ func (df DataFrame) Sample(n int, frac float64, replace bool, seed int64) DataFr
 		perm := rng.Perm(df.nrows)
 		indexes = perm[:sampleSize]
 	}
-	
+
 	return df.Subset(indexes)
 }
 
@@ -361,10 +368,11 @@ func (df DataFrame) Sample(n int, frac float64, replace bool, seed int64) DataFr
 // Enables method chaining for custom operations.
 //
 // Example:
-//   result := df.
-//       Filter(dataframe.F{"age", ">", 18}).
-//       Pipe(customTransform).
-//       Arrange(dataframe.Sort("name"))
+//
+//	result := df.
+//	    Filter(dataframe.F{"age", ">", 18}).
+//	    Pipe(customTransform).
+//	    Arrange(dataframe.Sort("name"))
 func (df DataFrame) Pipe(f func(DataFrame) DataFrame) DataFrame {
 	if df.Err != nil {
 		return df
@@ -376,7 +384,8 @@ func (df DataFrame) Pipe(f func(DataFrame) DataFrame) DataFrame {
 // Similar to pandas pipe() with args.
 //
 // Example:
-//   result := df.PipeWithArgs(customFunc, arg1, arg2)
+//
+//	result := df.PipeWithArgs(customFunc, arg1, arg2)
 func (df DataFrame) PipeWithArgs(f func(DataFrame, ...interface{}) DataFrame, args ...interface{}) DataFrame {
 	if df.Err != nil {
 		return df
@@ -412,19 +421,20 @@ func (df DataFrame) ApplyMapTyped(f func(interface{}) interface{}) DataFrame {
 
 	return New(columns...)
 }
-//
+
 // Example:
-//   df2 := df.ApplyMap(func(val interface{}) interface{} {
-//       if s, ok := val.(string); ok {
-//           return strings.ToUpper(s)
-//       }
-//       return val
-//   })
+//
+//	df2 := df.ApplyMap(func(val interface{}) interface{} {
+//	    if s, ok := val.(string); ok {
+//	        return strings.ToUpper(s)
+//	    }
+//	    return val
+//	})
 func (df DataFrame) ApplyMap(f func(interface{}) interface{}) DataFrame {
 	if df.Err != nil {
 		return df
 	}
-	
+
 	columns := make([]series.Series, df.ncols)
 	for i, col := range df.columns {
 		elements := make([]interface{}, df.nrows)
@@ -433,7 +443,7 @@ func (df DataFrame) ApplyMap(f func(interface{}) interface{}) DataFrame {
 		}
 		columns[i] = series.New(elements, col.Type(), col.Name)
 	}
-	
+
 	return New(columns...)
 }
 
@@ -449,12 +459,13 @@ func (df DataFrame) ApplyMap(f func(interface{}) interface{}) DataFrame {
 // - upper: maximum value (use nil for no upper bound)
 //
 // Example:
-//   df2 := df.Clip(0, 100)  // Clip all values to [0, 100]
+//
+//	df2 := df.Clip(0, 100)  // Clip all values to [0, 100]
 func (df DataFrame) Clip(lower, upper *float64) DataFrame {
 	if df.Err != nil {
 		return df
 	}
-	
+
 	columns := make([]series.Series, df.ncols)
 	for i, col := range df.columns {
 		if col.Type() != series.Float && col.Type() != series.Int {
@@ -462,7 +473,7 @@ func (df DataFrame) Clip(lower, upper *float64) DataFrame {
 			columns[i] = col.Copy()
 			continue
 		}
-		
+
 		floats := col.Float()
 		clipped := make([]float64, len(floats))
 		for j, v := range floats {
@@ -481,7 +492,7 @@ func (df DataFrame) Clip(lower, upper *float64) DataFrame {
 		columns[i] = series.Floats(clipped)
 		columns[i].Name = col.Name
 	}
-	
+
 	return New(columns...)
 }
 
@@ -489,22 +500,23 @@ func (df DataFrame) Clip(lower, upper *float64) DataFrame {
 // Similar to pandas Series clip().
 //
 // Example:
-//   df2 := df.ClipColumn("price", 0, 1000)
+//
+//	df2 := df.ClipColumn("price", 0, 1000)
 func (df DataFrame) ClipColumn(colname string, lower, upper *float64) DataFrame {
 	if df.Err != nil {
 		return df
 	}
-	
+
 	idx := df.ColIndex(colname)
 	if idx < 0 {
 		return DataFrame{Err: fmt.Errorf("clip: column %q not found", colname)}
 	}
-	
+
 	col := df.columns[idx]
 	if col.Type() != series.Float && col.Type() != series.Int {
 		return DataFrame{Err: fmt.Errorf("clip: column %q is not numeric", colname)}
 	}
-	
+
 	floats := col.Float()
 	clipped := make([]float64, len(floats))
 	for j, v := range floats {
@@ -520,11 +532,11 @@ func (df DataFrame) ClipColumn(colname string, lower, upper *float64) DataFrame 
 			clipped[j] = *upper
 		}
 	}
-	
+
 	result := df.Copy()
 	result.columns[idx] = series.Floats(clipped)
 	result.columns[idx].Name = col.Name
-	
+
 	return result
 }
 
@@ -540,12 +552,13 @@ func (df DataFrame) ClipColumn(colname string, lower, upper *float64) DataFrame 
 // - with: replacement value
 //
 // Example:
-//   df2 := df.Replace("NA", nil)  // Replace "NA" strings with NaN
+//
+//	df2 := df.Replace("NA", nil)  // Replace "NA" strings with NaN
 func (df DataFrame) Replace(toReplace, with interface{}) DataFrame {
 	if df.Err != nil {
 		return df
 	}
-	
+
 	columns := make([]series.Series, df.ncols)
 	for i, col := range df.columns {
 		elements := make([]interface{}, df.nrows)
@@ -559,7 +572,7 @@ func (df DataFrame) Replace(toReplace, with interface{}) DataFrame {
 		}
 		columns[i] = series.New(elements, col.Type(), col.Name)
 	}
-	
+
 	return New(columns...)
 }
 
@@ -567,17 +580,18 @@ func (df DataFrame) Replace(toReplace, with interface{}) DataFrame {
 // Similar to pandas Series replace().
 //
 // Example:
-//   df2 := df.ReplaceInColumn("status", "unknown", nil)
+//
+//	df2 := df.ReplaceInColumn("status", "unknown", nil)
 func (df DataFrame) ReplaceInColumn(colname string, toReplace, with interface{}) DataFrame {
 	if df.Err != nil {
 		return df
 	}
-	
+
 	idx := df.ColIndex(colname)
 	if idx < 0 {
 		return DataFrame{Err: fmt.Errorf("replace: column %q not found", colname)}
 	}
-	
+
 	col := df.columns[idx]
 	elements := make([]interface{}, df.nrows)
 	for j := 0; j < df.nrows; j++ {
@@ -588,10 +602,10 @@ func (df DataFrame) ReplaceInColumn(colname string, toReplace, with interface{})
 			elements[j] = val
 		}
 	}
-	
+
 	result := df.Copy()
 	result.columns[idx] = series.New(elements, col.Type(), col.Name)
-	
+
 	return result
 }
 
@@ -606,15 +620,16 @@ func (df DataFrame) ReplaceInColumn(colname string, toReplace, with interface{})
 // - coltypes: map of column name to target type
 //
 // Example:
-//   df2 := df.Astype(map[string]series.Type{
-//       "price": series.Float,
-//       "qty": series.Int,
-//   })
+//
+//	df2 := df.Astype(map[string]series.Type{
+//	    "price": series.Float,
+//	    "qty": series.Int,
+//	})
 func (df DataFrame) Astype(coltypes map[string]series.Type) DataFrame {
 	if df.Err != nil {
 		return df
 	}
-	
+
 	columns := make([]series.Series, df.ncols)
 	for i, col := range df.columns {
 		targetType, ok := coltypes[col.Name]
@@ -622,7 +637,7 @@ func (df DataFrame) Astype(coltypes map[string]series.Type) DataFrame {
 			columns[i] = col.Copy()
 			continue
 		}
-		
+
 		// Convert using BatchConvert for efficiency
 		switch col.Type() {
 		case series.Int:
@@ -641,7 +656,7 @@ func (df DataFrame) Astype(coltypes map[string]series.Type) DataFrame {
 			columns[i] = col.Copy()
 		}
 	}
-	
+
 	return New(columns...)
 }
 
@@ -659,7 +674,8 @@ func (df DataFrame) Astype(coltypes map[string]series.Type) DataFrame {
 // - inclusive: whether bounds are inclusive ("both", "neither", "left", "right")
 //
 // Example:
-//   mask := df.Between("age", 18, 65, "both")
+//
+//	mask := df.Between("age", 18, 65, "both")
 func (df DataFrame) Between(colname string, left, right float64, inclusive string) series.Series {
 	if df.Err != nil {
 		return series.Series{Err: df.Err}
@@ -671,10 +687,10 @@ func (df DataFrame) Between(colname string, left, right float64, inclusive strin
 	if col.Err != nil {
 		return col
 	}
-	
+
 	floats := col.Float()
 	bools := make([]bool, len(floats))
-	
+
 	for i, v := range floats {
 		switch inclusive {
 		case "both", "":
@@ -689,7 +705,7 @@ func (df DataFrame) Between(colname string, left, right float64, inclusive strin
 			bools[i] = v >= left && v <= right
 		}
 	}
-	
+
 	result := series.Bools(bools)
 	result.Name = colname
 	return result
@@ -707,17 +723,18 @@ func (df DataFrame) Between(colname string, left, right float64, inclusive strin
 // - values: set of values to check against
 //
 // Example:
-//   mask := df.IsIn("country", []string{"US", "UK", "CA"})
+//
+//	mask := df.IsIn("country", []string{"US", "UK", "CA"})
 func (df DataFrame) IsIn(colname string, values []interface{}) series.Series {
 	if df.Err != nil {
 		return series.Series{Err: df.Err}
 	}
-	
+
 	col := df.Col(colname)
 	if col.Err != nil {
 		return col
 	}
-	
+
 	// Build lookup map
 	lookup := make(map[string]bool)
 	for _, v := range values {
@@ -728,13 +745,13 @@ func (df DataFrame) IsIn(colname string, values []interface{}) series.Series {
 			lookup[fmt.Sprintf("%v", v)] = true
 		}
 	}
-	
+
 	bools := make([]bool, df.nrows)
 	for i := 0; i < df.nrows; i++ {
 		val := col.Elem(i).String()
 		bools[i] = lookup[val]
 	}
-	
+
 	result := series.Bools(bools)
 	result.Name = colname
 	return result
@@ -744,17 +761,18 @@ func (df DataFrame) IsIn(colname string, values []interface{}) series.Series {
 // Convenient wrapper around IsIn + Filter.
 //
 // Example:
-//   df2 := df.FilterIsIn("country", []string{"US", "UK", "CA"})
+//
+//	df2 := df.FilterIsIn("country", []string{"US", "UK", "CA"})
 func (df DataFrame) FilterIsIn(colname string, values []interface{}) DataFrame {
 	if df.Err != nil {
 		return df
 	}
-	
+
 	mask := df.IsIn(colname, values)
 	if mask.Err != nil {
 		return DataFrame{Err: mask.Err}
 	}
-	
+
 	return df.Subset(mask)
 }
 
