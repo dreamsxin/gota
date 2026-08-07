@@ -12,7 +12,8 @@ import (
 	"github.com/dreamsxin/gota/series"
 )
 
-// WriteParquet writes the DataFrame to w in Apache Parquet format.
+// WriteParquet writes the DataFrame to w in Apache Parquet format. Gota
+// missing values are encoded as nulls and rows are written in bounded batches.
 func (df DataFrame) WriteParquet(w io.Writer) error {
 	if df.Err != nil {
 		return df.Err
@@ -29,13 +30,18 @@ func (df DataFrame) WriteParquet(w io.Writer) error {
 		parquet.KeyValueMetadata("gota.columns", string(columnMeta)),
 	)
 
-	rows, err := parquetRowsFromDataFrame(df)
-	if err != nil {
-		return err
-	}
-	if _, err := writer.Write(rows); err != nil {
-		_ = writer.Close()
-		return fmt.Errorf("WriteParquet: %v", err)
+	const batchSize = 256
+	for start := 0; start < df.Nrow(); start += batchSize {
+		end := min(start+batchSize, df.Nrow())
+		rows, err := parquetRowsFromDataFrame(df, start, end)
+		if err != nil {
+			_ = writer.Close()
+			return err
+		}
+		if _, err := writer.Write(rows); err != nil {
+			_ = writer.Close()
+			return fmt.Errorf("WriteParquet: %v", err)
+		}
 	}
 	if err := writer.Close(); err != nil {
 		return fmt.Errorf("WriteParquet: %v", err)
@@ -98,7 +104,7 @@ func ReadParquet(r io.ReaderAt, size int64) DataFrame {
 			for i := 0; i < n; i++ {
 				record := make([]string, len(names))
 				for j, name := range names {
-					record[j] = parquetCellString(batch[i][name])
+					record[j] = parquetCellString(batch[i][name], fieldMap[name])
 				}
 				records = append(records, record)
 				clear(batch[i])
@@ -134,7 +140,7 @@ func ReadParquetFile(path string) DataFrame {
 func parquetSchemaFromDataFrame(df DataFrame) *parquet.Schema {
 	fields := make(parquet.Group, df.Ncol())
 	for _, col := range df.columns {
-		fields[col.Name] = parquetNodeFromSeriesType(col.Type())
+		fields[col.Name] = parquet.Optional(parquetNodeFromSeriesType(col.Type()))
 	}
 	return parquet.NewSchema("gota", fields)
 }
@@ -154,9 +160,9 @@ func parquetNodeFromSeriesType(t series.Type) parquet.Node {
 	}
 }
 
-func parquetRowsFromDataFrame(df DataFrame) ([]map[string]interface{}, error) {
-	rows := make([]map[string]interface{}, df.Nrow())
-	for row := 0; row < df.Nrow(); row++ {
+func parquetRowsFromDataFrame(df DataFrame, start, end int) ([]map[string]interface{}, error) {
+	rows := make([]map[string]interface{}, end-start)
+	for row := start; row < end; row++ {
 		out := make(map[string]interface{}, df.Ncol())
 		for _, col := range df.columns {
 			value, err := parquetValueFromElement(col, row)
@@ -165,32 +171,42 @@ func parquetRowsFromDataFrame(df DataFrame) ([]map[string]interface{}, error) {
 			}
 			out[col.Name] = value
 		}
-		rows[row] = out
+		rows[row-start] = out
 	}
 	return rows, nil
 }
 
 func parquetValueFromElement(col series.Series, row int) (interface{}, error) {
 	elem := col.Elem(row)
+	if elem.IsNA() {
+		return nil, nil
+	}
 	switch col.Type() {
 	case series.Int:
 		v, err := elem.Int()
 		if err != nil {
 			return nil, fmt.Errorf("WriteParquet: column %q row %d: %v", col.Name, row, err)
 		}
-		return int64(v), nil
+		value := int64(v)
+		return &value, nil
 	case series.Float:
-		return elem.Float(), nil
+		value := elem.Float()
+		return &value, nil
 	case series.Bool:
 		v, err := elem.Bool()
 		if err != nil {
 			return nil, fmt.Errorf("WriteParquet: column %q row %d: %v", col.Name, row, err)
 		}
-		return v, nil
+		return &v, nil
 	case series.Time:
-		return elem.Val(), nil
+		v, err := elem.Time()
+		if err != nil {
+			return nil, fmt.Errorf("WriteParquet: column %q row %d: %v", col.Name, row, err)
+		}
+		return &v, nil
 	default:
-		return elem.String(), nil
+		value := elem.String()
+		return &value, nil
 	}
 }
 
@@ -218,13 +234,31 @@ func seriesTypeFromParquet(field parquet.Field) series.Type {
 	return series.String
 }
 
-func parquetCellString(value interface{}) string {
+func parquetCellString(value interface{}, field parquet.Field) string {
+	if field != nil {
+		if logical := field.Type().LogicalType(); logical != nil && logical.Timestamp != nil {
+			switch v := value.(type) {
+			case int64:
+				return parquetTimestampString(v, logical.Timestamp.Unit.Millis != nil, logical.Timestamp.Unit.Micros != nil)
+			case *int64:
+				if v == nil {
+					return "NaN"
+				}
+				return parquetTimestampString(*v, logical.Timestamp.Unit.Millis != nil, logical.Timestamp.Unit.Micros != nil)
+			}
+		}
+	}
 	switch v := value.(type) {
 	case nil:
 		return "NaN"
 	case []byte:
 		return string(v)
 	case time.Time:
+		return v.Format(time.RFC3339Nano)
+	case *time.Time:
+		if v == nil {
+			return "NaN"
+		}
 		return v.Format(time.RFC3339Nano)
 	case int32:
 		return strconv.FormatInt(int64(v), 10)
@@ -241,6 +275,22 @@ func parquetCellString(value interface{}) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+func parquetTimestampString(value int64, millis, micros bool) string {
+	var seconds, nanoseconds int64
+	switch {
+	case millis:
+		seconds = value / 1_000
+		nanoseconds = (value % 1_000) * int64(time.Millisecond)
+	case micros:
+		seconds = value / 1_000_000
+		nanoseconds = (value % 1_000_000) * int64(time.Microsecond)
+	default:
+		seconds = value / 1_000_000_000
+		nanoseconds = value % 1_000_000_000
+	}
+	return time.Unix(seconds, nanoseconds).UTC().Format(time.RFC3339Nano)
 }
 
 func parquetColumnOrder(file *parquet.File, fields map[string]parquet.Field) []string {

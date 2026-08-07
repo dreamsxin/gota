@@ -1,11 +1,12 @@
 Gota: DataFrames, Series and Data Wrangling for Go
 ==================================================
 
-`github.com/dreamsxin/gota` — Go 1.24+
+`github.com/dreamsxin/gota` — Go 1.24.9+
 
-A comprehensive implementation of DataFrames, Series and data wrangling
-methods for Go, inspired by pandas. The API is still evolving so
-*use at your own risk*.
+An embeddable, single-process, in-memory implementation of DataFrames, Series,
+and data wrangling methods for Go, inspired by pandas. Gota provides an eager Go
+API rather than pandas API parity. The API is still evolving, so review release
+notes when upgrading.
 
 ## Table of Contents
 
@@ -49,7 +50,7 @@ methods for Go, inspired by pandas. The API is still evolving so
   - [Correlation & Covariance](#correlation--covariance-series)
   - [Type Conversion](#type-conversion)
   - [Categorical](#categorical)
-- [New DataFrame APIs (v1.3+)](#new-dataframe-apis-v13)
+- [Additional DataFrame APIs (v1.2.1)](#additional-dataframe-apis-v121)
   - [Shift](#shift)
   - [Assign](#assign)
   - [Explode](#explode)
@@ -57,7 +58,7 @@ methods for Go, inspired by pandas. The API is still evolving so
   - [Stack / Unstack](#stack--unstack)
   - [Resample](#resample)
   - [Parallel operations](#parallel-operations)
-- [New I/O APIs (v1.5+)](#new-io-apis-v15)
+- [Additional I/O APIs (v1.2.1)](#additional-io-apis-v121)
   - [JSON Lines (NDJSON)](#json-lines-ndjson)
   - [Excel — sheet selection](#excel--sheet-selection)
   - [SQL — named placeholders](#sql--named-placeholders)
@@ -72,7 +73,7 @@ methods for Go, inspired by pandas. The API is still evolving so
 go get github.com/dreamsxin/gota
 ```
 
-Requires Go 1.24+. Key dependencies:
+Requires Go 1.24.9+. Key dependencies:
 
 | Package | Purpose |
 |---|---|
@@ -414,7 +415,8 @@ err := df.WriteXLSX(w,
 ### Parquet I/O
 
 Uses [parquet-go](https://github.com/parquet-go/parquet-go). Supports Gota
-`String`, `Int`, `Float`, `Bool` and `Time` columns.
+`String`, `Int`, `Float`, `Bool` and `Time` columns. Missing values are stored
+as Parquet nulls, and writes are processed in bounded row batches.
 
 ```go
 err := df.WriteParquet(w)
@@ -490,10 +492,21 @@ rows := midf.Loc("2024", "Q1") // full key
 rows := midf.Loc("2024")       // partial key (all 2024 rows)
 ```
 
+`IndexedDataFrame` and `MultiIndexedDataFrame` are lookup wrappers. Operations
+such as `Loc` return a regular `DataFrame`; indexes are not automatically
+propagated through arbitrary DataFrame transformations in v1.2.1.
+
 ### Chaining operations
 
-All methods return a new DataFrame and propagate errors — once an error
-occurs, subsequent operations become no-ops:
+Most transformation methods return a new DataFrame. `DataFrame.Set`,
+`DataFrame.FillNaN`, and `DataFrame.SetNames` mutate shared column storage;
+`Series.Set`, `Series.Append`, and `Series.FillNaN` also mutate the original
+Series. Call `Copy` before these methods when the original value must remain
+unchanged. `NewNoCopy` aliases its input Series and requires exclusive lifecycle
+control.
+
+DataFrame-returning operations propagate sticky errors: once an error occurs,
+subsequent chain operations become no-ops until the error is inspected:
 
 ```go
 a = a.Rename("Origin", "Country").
@@ -735,7 +748,6 @@ s.Rolling(3).Apply(func(w []float64) float64 {
 By default `minPeriods` equals the window size — leading positions without a
 full window emit NaN. Use `MinPeriods(1)` to emit results as soon as one
 observation is available.
-```
 
 ### EWM (Exponentially Weighted Moving)
 
@@ -816,9 +828,11 @@ Conversion rules:
 
 ### Categorical
 
-`Categorical` is a memory-efficient column type for low-cardinality string data
-(country codes, status labels, enum-like columns). It uses dictionary encoding:
-a sorted slice of unique strings plus a `[]int32` code array.
+`Categorical` is a standalone memory-efficient representation for
+low-cardinality string data (country codes, status labels, enum-like columns).
+It uses dictionary encoding: a sorted slice of unique strings plus a `[]int32`
+code array. In v1.2.1 it is not a native `Series.Type`; use `ToSeries` before
+placing it in a DataFrame.
 
 ```go
 // Create from string slice
@@ -851,7 +865,7 @@ bytes := cat.MemoryBytes()
 
 ---
 
-### New DataFrame APIs (v1.3+)
+### Additional DataFrame APIs (v1.2.1)
 
 #### Shift
 
@@ -887,11 +901,15 @@ df.Query("status == active")
 df.Query("age >= 18 AND age <= 65")
 df.Query("country in US,UK,CA")
 df.Query("score > 0.5 OR label == good")
+df.Query("active == true AND (score > 0.5 OR label == good)")
+df.Query(`label in "A AND B","x,y"`) // quoted values preserve spaces/commas
 ```
 
 Operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, `in`, `not in`.
 Combine with `AND` / `OR` (case-insensitive). Column names containing
-operator substrings (e.g. `income`, `bandwidth`) are handled correctly.
+operator substrings (e.g. `income`, `bandwidth`) are handled correctly. `AND`
+binds more tightly than `OR`; parentheses override precedence. Single- or
+double-quoted values may contain logical words and commas.
 
 #### Stack / Unstack
 
@@ -924,7 +942,7 @@ groups.AggregationParallel(typs, colnames)              // parallel GroupBy aggr
 
 ---
 
-### New I/O APIs (v1.5+)
+### Additional I/O APIs (v1.2.1)
 
 #### JSON Lines (NDJSON)
 
@@ -967,4 +985,4 @@ err := dataframe.ScanCSV(f, 1000, func(batch dataframe.DataFrame) error {
 
 ## License
 
-MIT — see [LICENSE.md](LICENSE.md)
+Apache-2.0 — see [LICENSE.md](LICENSE.md)

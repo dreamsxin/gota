@@ -7,112 +7,68 @@ This document follows
 
 ## [Unreleased]
 
-### Added
+## [1.2.1] - 2026-08-07
 
-- `ReadCSV` / `ScanCSV`: optional delimiter auto-detection via `DetectDelimiter(true)` for comma, tab, semicolon and pipe-delimited files.
-- `ReadXLSXSheets` / `ReadXLSXFileSheets`: read every XLSX sheet into `map[string]DataFrame`, similar to pandas `read_excel(sheet_name=None)`.
-- `ReadParquet` / `ReadParquetFile` and `WriteParquet` / `WriteParquetFile` for basic Parquet round-trips using `github.com/parquet-go/parquet-go`.
-- `WriteSQL`: `WithUpsert(...)` and `WithUpsertUpdateColumns(...)` for SQLite/PostgreSQL `ON CONFLICT` upserts.
-- `WriteXLSX`: style options for bold headers, column widths and per-column custom number formats.
-
-## [2.3.0] - 2026-04-04
-
-### Changed (Performance)
-- `Query`: pre-fetch `col.Float()` / `col.Records()` once per clause — eliminates per-row `fmt.Sprintf` / interface dispatch
-- `Unstack`: pre-cache idVar columns and parsed row-key parts — eliminates repeated `df.Col()` + `strings.Split` per output row
-- `ValueCounts` (DataFrame): replaced per-element `col.Elem(i).String()` loop with single `col.Records()` bulk call
-- `RapplyParallel`: added `sync.Pool` for per-row scratch Series — reduces GC pressure on large DataFrames
-- `Resample`: groups keyed by `int64` Unix nanoseconds instead of formatted string — avoids `fmt.Sprintf` per row
-- `Arrange`: parallel merge-sort (k-way heap merge) for DataFrames > 100k rows using `numWorkers()` goroutines
-
----
-
-## [2.2.0] - 2026-04-04
+This patch release contains the backward-compatible work since v1.2.0.
 
 ### Added
 
-#### DataFrame
-- `Describe`: added `count` and `nunique` rows to summary statistics
-- `Interpolate(method)` — fill NaN in numeric columns via `"linear"` or `"forward"` interpolation
-- `CrossTab(rowCol, colCol)` — frequency cross-tabulation (contingency table)
-- `ApplyMapTyped(f)` — element-wise map that preserves each column's original type
-- `Query`: quoted column name syntax (`"col name" > 5` / `'col name' == foo`) for columns containing spaces
-
-#### Series
-- `Mode()` — most frequent value (deterministic: lexicographically smallest on tie)
-- `Skew()` — adjusted Fisher-Pearson sample skewness (pandas-compatible)
-- `Kurt()` — unbiased excess kurtosis (pandas-compatible, normal == 0)
-
-#### Categorical
-- `ValueCounts()` — lazy cache; result is recomputed only after `SetValue` or `AddCategory`
-
-### Fixed
-- `Unstack`: missing `(rowKey, varVal)` cells now filled with typed NaN (`NaN` for Float/Int, `false` for Bool, `""` for String/Time) instead of the literal string `"NaN"`
-- `Query`: column names containing spaces now supported via quoted syntax
-
----
-
-## [2.0.0] - 2026-04-03
-
-### Added
-
-#### DataFrame
-- `Shift(periods, subset...)` — shift column values by n rows (NaN fill)
-- `Assign(name, fn)` — add or replace a column via a function
-- `Explode(col)` — expand comma-separated column into multiple rows
-- `Query(expr)` — expression-based row filter (`col op val`, AND/OR, in/not in)
-- `Stack` / `Unstack` — wide↔long reshape (Stack is an alias for Melt)
-- `Resample(colname, freq)` — time-based grouping (D/W/M/Y/H) with `Aggregation`
-- `CapplyParallel` — parallel column-wise apply using GOMAXPROCS goroutines
-- `RapplyParallel` — parallel row-wise apply, row order preserved
-- `AggregationParallel` — parallel GroupBy aggregation
-- `RenameAll(map)` — batch column rename
-- `AsCategorical(col)` — convert a String column to `series.Categorical`
-- `WriteXLSXMultiSheet` — write multiple DataFrames to separate sheets
-- `ReadXLSX` / `ReadXLSXFile` now accept `WithSheet(name)` option
-- `WriteSQL` now accepts `WithPlaceholderStyle` for PostgreSQL (`$1`) and SQL Server (`@p1`)
-- `ScanCSV(r, batchSize, fn)` — streaming CSV reader for large files
-- `ReadNDJSON` / `WriteNDJSON` — JSON Lines (NDJSON) read/write
-- `GroupBy.Transform` now preserves original row order via hidden index column
-- `GroupBy` key builder supports all types including `Time`
-
-#### Series
-- `Clip(lower, upper)` — element-wise value clipping
-- `Replace(from, to)` — element-wise value replacement
-- `Between(left, right, inclusive)` — range check returning Bool Series
-- `IsIn(values)` — membership test returning Bool Series
-- `Abs()`, `Round(places)`, `Sign()`, `Pow(exp)`, `Sqrt()`, `Log()`, `Log10()`, `Exp()` — math operations
-- `Categorical` type — dictionary-encoded low-cardinality string column
-
-#### I/O
-- Excel: `WithSheet(name)` option for `ReadXLSX`
-- Excel: `WriteXLSXMultiSheet` for multi-sheet workbooks
-- SQL: `WithPlaceholderStyle` for named placeholders
-- CSV: `ScanCSV` streaming mode
-- NDJSON: `ReadNDJSON` / `WriteNDJSON`
-
-### Fixed
-- `series.Copy` / `Append` / `Subset` / `Fill` missing `Time` type branch (silent data loss)
-- `BatchConvert` pool use-after-free (elements returned to pool while Series still held reference)
-- `Aggregation` panic on empty groups (`dfMaps[0]` index out of range)
-- `Describe` panic on `Time` columns (missing type branch)
-- `Rolling.StdDev` rewritten with Welford's online algorithm (O(n), was O(n·w))
-- `EWM.Var` / `EWM.Std` rewritten with pandas-compatible weighted Bessel correction
-- `Sample` without replacement no longer sorts result indexes (preserves sampled order)
-- `Info` memory estimate uses actual string lengths for String columns
-- `GroupBy.GetGroups` / `Apply` strip hidden `__groupby_row_idx__` column from results
-- `Query` operator search uses word-boundary matching — column names like `income`, `bandwidth` no longer misfire
-- `Unstack` returns error on empty `idVars` instead of panicking
-- `ScanCSV` batch slice copied before `LoadRecords` — prevents cross-batch data corruption
-- `ReadNDJSON` scanner buffer raised to 10 MB
-- `mat.Div` division by zero now returns NaN instead of 0
+- Optional delimiter detection for `ReadCSV` and `ScanCSV`.
+- Multi-sheet Excel reads and Excel write formatting options.
+- SQLite/PostgreSQL upsert options for `WriteSQL`.
+- Parquet read/write for String, Int, Float, Bool, and Time columns.
 
 ### Changed
-- `pool.go` element pool helpers (`GetXxxElements` etc.) made unexported
-- `Describe` shows min/max RFC3339 timestamps for `Time` columns
-- `GroupBy` key builder uses `fmt.Sprintf("%v", ...)` — supports all types
 
+- Hash joins now use collision-safe composite key encoding and document expected
+  `O(n+m+k)` complexity, where `k` is the output size.
+- Query now implements `AND` precedence over `OR`, parentheses, quoted column
+  names, and quoted values containing logical words or commas.
+- Parquet writes use bounded batches and encode missing values as Parquet nulls.
+- README and ROADMAP now describe the supported single-process, in-memory scope,
+  ownership caveats, index behavior, and v1 release line.
 
+### Fixed
+
+- Composite string join keys can no longer collide when values contain delimiter
+  or type-like text.
+- MultiIndex partial keys no longer match a prefix of a different level label;
+  labels containing the old separator remain distinct.
+- Parquet nulls round-trip for every supported type, including false, zero,
+  empty strings, and Time values adjacent to nulls.
+- README release versions, mutability contract, Markdown rendering, and the
+  license identifier (Apache-2.0, matching `LICENSE.md`).
+
+## [1.2.0] - 2026-07-06
+
+### Added
+
+- DataFrame operations including `Shift`, `Assign`, `ExplodeOn`, `Query`,
+  `Stack`, `Unstack`, `Resample`, `Interpolate`, `CrossTab`, `RenameAll`, and
+  `ApplyMapTyped`.
+- Parallel column, row, grouped aggregation, and large-DataFrame arrange paths.
+- Index and MultiIndex wrappers with full and partial label lookup.
+- Series EWM variance/stddev, cumulative and math operations, `Mode`, `Skew`,
+  `Kurt`, generic batch conversion, and standalone Categorical values.
+- Excel sheet selection and multi-sheet output, SQL placeholder styles,
+  streaming CSV, and NDJSON I/O.
+
+### Changed
+
+- Rolling standard deviation uses Welford's algorithm; grouped aggregation,
+  resampling, unstacking, value counts, and row-wise apply reduce repeated work
+  and allocations.
+- `Describe` includes count/nunique and Time min/max values.
+
+### Fixed
+
+- Time Series copy/append/subset/fill gaps and BatchConvert pool use-after-free.
+- Empty grouped aggregation and unsupported Unstack inputs return errors instead
+  of panicking.
+- GroupBy transform row order, hidden group columns, ScanCSV batch ownership,
+  sample order, NDJSON buffer size, and division-by-zero behavior.
+
+## [0.12.0] - 2021-10-10
 
 ### Added in 0.12.0
 
@@ -406,7 +362,7 @@ This document follows
 [0.10.1]:https://github.com/dreamsxin/gota/compare/v0.10.0...v0.10.1
 [0.11.0]:https://github.com/dreamsxin/gota/compare/v0.10.1...v0.11.0
 [0.12.0]:https://github.com/dreamsxin/gota/compare/v0.11.0...v0.12.0
-
-[2.3.0]:https://github.com/dreamsxin/gota/compare/v2.2.0...v2.3.0
-[2.2.0]:https://github.com/dreamsxin/gota/compare/v2.0.0...v2.2.0
-[2.0.0]:https://github.com/dreamsxin/gota/compare/v1.1.0...v2.0.0
+[1.0.0]:https://github.com/dreamsxin/gota/compare/v0.12.0...v1.0.0
+[1.1.0]:https://github.com/dreamsxin/gota/compare/v1.0.0...v1.1.0
+[1.2.0]:https://github.com/dreamsxin/gota/compare/v1.1.0...v1.2.0
+[1.2.1]:https://github.com/dreamsxin/gota/compare/v1.2.0...v1.2.1

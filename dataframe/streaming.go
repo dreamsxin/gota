@@ -133,6 +133,8 @@ func ScanCSV(r io.Reader, batchSize int, fn func(DataFrame) error, options ...Lo
 // Supported syntax: "<colname> <op> <value>"
 // Operators: ==, !=, >, >=, <, <=, in, not in
 // Multiple conditions can be combined with AND or OR (case-insensitive).
+// AND binds more tightly than OR, and parentheses override precedence.
+// Column names and values may be quoted with single or double quotes.
 //
 // Examples:
 //
@@ -149,67 +151,193 @@ func (df DataFrame) Query(expr string) DataFrame {
 		return df.Copy()
 	}
 
-	// Split on AND / OR (case-insensitive) as whole words.
-	type clause struct {
-		op   string // "AND" or "OR" (empty for first)
-		cond string
+	tokens, err := tokenizeQueryExpression(expr)
+	if err != nil {
+		return DataFrame{Err: fmt.Errorf("Query: %v", err)}
 	}
-	var clauses []clause
-	rest := strings.TrimSpace(expr)
-	for rest != "" {
-		andIdx := wordBoundaryIndex(rest, "AND")
-		orIdx := wordBoundaryIndex(rest, "OR")
-
-		var splitAt int
-		var splitOp string
-		switch {
-		case andIdx == -1 && orIdx == -1:
-			splitAt = -1
-		case andIdx == -1:
-			splitAt, splitOp = orIdx, "OR"
-		case orIdx == -1:
-			splitAt, splitOp = andIdx, "AND"
-		case andIdx < orIdx:
-			splitAt, splitOp = andIdx, "AND"
-		default:
-			splitAt, splitOp = orIdx, "OR"
-		}
-
-		if splitAt == -1 {
-			clauses = append(clauses, clause{cond: strings.TrimSpace(rest)})
-			break
-		}
-		clauses = append(clauses, clause{cond: strings.TrimSpace(rest[:splitAt])})
-		rest = strings.TrimSpace(rest[splitAt+len(splitOp):])
-		if len(clauses) > 0 {
-			clauses[len(clauses)-1].op = splitOp
-		}
-	}
-
-	// Evaluate each clause into a []bool mask.
-	masks := make([][]bool, len(clauses))
-	for i, c := range clauses {
-		mask, err := df.evalQueryClause(c.cond)
-		if err != nil {
-			return DataFrame{Err: fmt.Errorf("Query: %v", err)}
-		}
-		masks[i] = mask
-	}
-
-	// Combine masks.
-	result := masks[0]
-	for i := 1; i < len(clauses); i++ {
-		op := clauses[i-1].op
-		for j := range result {
-			switch strings.ToUpper(op) {
-			case "OR":
-				result[j] = result[j] || masks[i][j]
-			default: // AND
-				result[j] = result[j] && masks[i][j]
-			}
-		}
+	parser := queryMaskParser{df: df, tokens: tokens}
+	result, err := parser.parse()
+	if err != nil {
+		return DataFrame{Err: fmt.Errorf("Query: %v", err)}
 	}
 	return df.Subset(result)
+}
+
+type queryTokenKind uint8
+
+const (
+	queryTokenCondition queryTokenKind = iota
+	queryTokenAnd
+	queryTokenOr
+	queryTokenLeftParen
+	queryTokenRightParen
+)
+
+type queryToken struct {
+	kind queryTokenKind
+	text string
+}
+
+func tokenizeQueryExpression(expr string) ([]queryToken, error) {
+	var tokens []queryToken
+	start := 0
+	var quote byte
+	escaped := false
+
+	flushCondition := func(end int) {
+		if condition := strings.TrimSpace(expr[start:end]); condition != "" {
+			tokens = append(tokens, queryToken{kind: queryTokenCondition, text: condition})
+		}
+	}
+
+	for i := 0; i < len(expr); i++ {
+		ch := expr[i]
+		if quote != 0 {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			continue
+		}
+
+		switch {
+		case ch == '(':
+			flushCondition(i)
+			tokens = append(tokens, queryToken{kind: queryTokenLeftParen, text: "("})
+			start = i + 1
+		case ch == ')':
+			flushCondition(i)
+			tokens = append(tokens, queryToken{kind: queryTokenRightParen, text: ")"})
+			start = i + 1
+		case queryKeywordAt(expr, i, "AND"):
+			flushCondition(i)
+			tokens = append(tokens, queryToken{kind: queryTokenAnd, text: "AND"})
+			i += len("AND") - 1
+			start = i + 1
+		case queryKeywordAt(expr, i, "OR"):
+			flushCondition(i)
+			tokens = append(tokens, queryToken{kind: queryTokenOr, text: "OR"})
+			i += len("OR") - 1
+			start = i + 1
+		}
+	}
+	if quote != 0 {
+		return nil, fmt.Errorf("unterminated quoted value")
+	}
+	flushCondition(len(expr))
+	if len(tokens) == 0 {
+		return nil, fmt.Errorf("empty expression")
+	}
+	return tokens, nil
+}
+
+func queryKeywordAt(expr string, pos int, keyword string) bool {
+	end := pos + len(keyword)
+	if end > len(expr) || !strings.EqualFold(expr[pos:end], keyword) {
+		return false
+	}
+	before := pos == 0 || isQueryBoundary(expr[pos-1])
+	after := end == len(expr) || isQueryBoundary(expr[end])
+	return before && after
+}
+
+func isQueryBoundary(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' || ch == '(' || ch == ')'
+}
+
+type queryMaskParser struct {
+	df     DataFrame
+	tokens []queryToken
+	pos    int
+}
+
+func (p *queryMaskParser) parse() ([]bool, error) {
+	mask, err := p.parseOr()
+	if err != nil {
+		return nil, err
+	}
+	if p.pos != len(p.tokens) {
+		return nil, fmt.Errorf("unexpected token %q", p.tokens[p.pos].text)
+	}
+	return mask, nil
+}
+
+func (p *queryMaskParser) parseOr() ([]bool, error) {
+	left, err := p.parseAnd()
+	if err != nil {
+		return nil, err
+	}
+	for p.pos < len(p.tokens) && p.tokens[p.pos].kind == queryTokenOr {
+		p.pos++
+		right, err := p.parseAnd()
+		if err != nil {
+			return nil, err
+		}
+		combineQueryMasks(left, right, false)
+	}
+	return left, nil
+}
+
+func (p *queryMaskParser) parseAnd() ([]bool, error) {
+	left, err := p.parsePrimary()
+	if err != nil {
+		return nil, err
+	}
+	for p.pos < len(p.tokens) && p.tokens[p.pos].kind == queryTokenAnd {
+		p.pos++
+		right, err := p.parsePrimary()
+		if err != nil {
+			return nil, err
+		}
+		combineQueryMasks(left, right, true)
+	}
+	return left, nil
+}
+
+func (p *queryMaskParser) parsePrimary() ([]bool, error) {
+	if p.pos >= len(p.tokens) {
+		return nil, fmt.Errorf("incomplete expression")
+	}
+	token := p.tokens[p.pos]
+	switch token.kind {
+	case queryTokenCondition:
+		p.pos++
+		return p.df.evalQueryClause(token.text)
+	case queryTokenLeftParen:
+		p.pos++
+		mask, err := p.parseOr()
+		if err != nil {
+			return nil, err
+		}
+		if p.pos >= len(p.tokens) || p.tokens[p.pos].kind != queryTokenRightParen {
+			return nil, fmt.Errorf("missing closing parenthesis")
+		}
+		p.pos++
+		return mask, nil
+	default:
+		return nil, fmt.Errorf("unexpected token %q", token.text)
+	}
+}
+
+func combineQueryMasks(left, right []bool, and bool) {
+	for i := range left {
+		if and {
+			left[i] = left[i] && right[i]
+		} else {
+			left[i] = left[i] || right[i]
+		}
+	}
 }
 
 // evalQueryClause evaluates a single "col op value" clause.
@@ -292,10 +420,13 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 
 	switch strings.ToLower(op) {
 	case "in", "not in":
-		vals := strings.Split(valPart, ",")
+		vals, err := parseQueryList(valPart)
+		if err != nil {
+			return nil, err
+		}
 		lookup := make(map[string]struct{}, len(vals))
 		for _, v := range vals {
-			lookup[strings.TrimSpace(v)] = struct{}{}
+			lookup[v] = struct{}{}
 		}
 		isIn := strings.ToLower(op) == "in"
 		// Cache string representations to avoid repeated conversion.
@@ -308,8 +439,15 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 			result[i] = found == isIn
 		}
 	default:
+		comparisonValue, quoted, err := parseQueryValue(valPart)
+		if err != nil {
+			return nil, err
+		}
 		// Numeric comparison if possible, else string.
-		numVal, numErr := strconv.ParseFloat(valPart, 64)
+		numVal, numErr := strconv.ParseFloat(comparisonValue, 64)
+		if quoted {
+			numErr = fmt.Errorf("quoted value")
+		}
 		// Cache string/float representations once to avoid repeated fmt.Sprintf per row.
 		if numErr == nil {
 			floats := col.Float()
@@ -344,17 +482,17 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 				es := strs[i]
 				switch op {
 				case "==":
-					result[i] = es == valPart
+					result[i] = es == comparisonValue
 				case "!=":
-					result[i] = es != valPart
+					result[i] = es != comparisonValue
 				case ">":
-					result[i] = es > valPart
+					result[i] = es > comparisonValue
 				case ">=":
-					result[i] = es >= valPart
+					result[i] = es >= comparisonValue
 				case "<":
-					result[i] = es < valPart
+					result[i] = es < comparisonValue
 				case "<=":
-					result[i] = es <= valPart
+					result[i] = es <= comparisonValue
 				}
 			}
 		}
@@ -362,24 +500,83 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 	return result, nil
 }
 
-// wordBoundaryIndex returns the byte index of word (case-insensitive) in s,
-// requiring it to be surrounded by spaces or string boundaries.
-// Returns -1 if not found.
-func wordBoundaryIndex(s, word string) int {
-	lower := strings.ToLower(s)
-	lword := strings.ToLower(word)
+func parseQueryList(input string) ([]string, error) {
+	var values []string
 	start := 0
-	for {
-		idx := strings.Index(lower[start:], lword)
-		if idx < 0 {
-			return -1
+	var quote byte
+	escaped := false
+	for i := 0; i < len(input); i++ {
+		ch := input[i]
+		if quote != 0 {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == quote {
+				quote = 0
+			}
+			continue
 		}
-		abs := start + idx
-		before := abs == 0 || lower[abs-1] == ' '
-		after := abs+len(lword) >= len(lower) || lower[abs+len(lword)] == ' '
-		if before && after {
-			return abs
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			continue
 		}
-		start = abs + 1
+		if ch == ',' {
+			value, _, err := parseQueryValue(input[start:i])
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+			start = i + 1
+		}
 	}
+	if quote != 0 {
+		return nil, fmt.Errorf("unterminated quoted value")
+	}
+	value, _, err := parseQueryValue(input[start:])
+	if err != nil {
+		return nil, err
+	}
+	return append(values, value), nil
+}
+
+func parseQueryValue(input string) (value string, quoted bool, err error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", false, fmt.Errorf("missing comparison value")
+	}
+	if input[0] != '\'' && input[0] != '"' {
+		return input, false, nil
+	}
+
+	quote := input[0]
+	var sb strings.Builder
+	escaped := false
+	for i := 1; i < len(input); i++ {
+		ch := input[i]
+		if escaped {
+			if ch != quote && ch != '\\' {
+				sb.WriteByte('\\')
+			}
+			sb.WriteByte(ch)
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch == quote {
+			if strings.TrimSpace(input[i+1:]) != "" {
+				return "", false, fmt.Errorf("unexpected text after quoted value")
+			}
+			return sb.String(), true, nil
+		}
+		sb.WriteByte(ch)
+	}
+	return "", false, fmt.Errorf("unterminated quoted value")
 }

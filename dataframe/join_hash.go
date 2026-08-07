@@ -2,6 +2,7 @@ package dataframe
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/dreamsxin/gota/series"
@@ -62,19 +63,28 @@ func resolveJoinKeys(a, b DataFrame, keys []string) (joinKeys, error) {
 	return jk, nil
 }
 
-// buildJoinKey builds a composite string key from the given row index using
-// the specified key columns.  Each element is prefixed by its type tag so that
-// the integer 1 and the string "1" produce distinct keys.
+// buildJoinKey builds an unambiguous composite key for the selected columns.
+// Length prefixes prevent values containing separators or type-like text from
+// colliding, and the validity marker distinguishes missing values explicitly.
 func buildJoinKey(cols []series.Series, keyIdxs []int, row int) string {
 	var sb strings.Builder
 	for _, k := range keyIdxs {
 		elem := cols[k].Elem(row)
-		sb.WriteByte('|')
-		sb.WriteString(string(elem.Type()))
-		sb.WriteByte(':')
-		sb.WriteString(elem.String())
+		appendLengthPrefixed(&sb, string(elem.Type()))
+		if elem.IsNA() {
+			sb.WriteByte('0')
+			continue
+		}
+		sb.WriteByte('1')
+		appendLengthPrefixed(&sb, elem.String())
 	}
 	return sb.String()
+}
+
+func appendLengthPrefixed(sb *strings.Builder, value string) {
+	sb.WriteString(strconv.Itoa(len(value)))
+	sb.WriteByte(':')
+	sb.WriteString(value)
 }
 
 // buildHashTable builds a map from join key → list of row indices for DataFrame b.

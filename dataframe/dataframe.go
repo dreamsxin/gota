@@ -3187,7 +3187,7 @@ func (df DataFrame) Melt(idVars []string, valueVars []string, varName, valueName
 }
 
 // InnerJoin returns a DataFrame containing the inner join of two DataFrames.
-// It uses a hash-join algorithm (O(n+m)) instead of a nested-loop (O(n*m)).
+// It uses a hash join with O(n+m+k) expected time, where k is the output size.
 func (df DataFrame) InnerJoin(b DataFrame, keys ...string) DataFrame {
 	if len(keys) == 0 {
 		return DataFrame{Err: fmt.Errorf("join keys not specified")}
@@ -3213,7 +3213,7 @@ func (df DataFrame) InnerJoin(b DataFrame, keys ...string) DataFrame {
 }
 
 // LeftJoin returns a DataFrame containing the left join of two DataFrames.
-// It uses a hash-join algorithm (O(n+m)) instead of a nested-loop (O(n*m)).
+// It uses a hash join with O(n+m+k) expected time, where k is the output size.
 func (df DataFrame) LeftJoin(b DataFrame, keys ...string) DataFrame {
 	if len(keys) == 0 {
 		return DataFrame{Err: fmt.Errorf("join keys not specified")}
@@ -3243,7 +3243,7 @@ func (df DataFrame) LeftJoin(b DataFrame, keys ...string) DataFrame {
 }
 
 // RightJoin returns a DataFrame containing the right join of two DataFrames.
-// It uses a hash-join algorithm (O(n+m)) instead of a nested-loop (O(n*m)).
+// It uses a hash join with O(n+m+k) expected time, where k is the output size.
 func (df DataFrame) RightJoin(b DataFrame, keys ...string) DataFrame {
 	if len(keys) == 0 {
 		return DataFrame{Err: fmt.Errorf("join keys not specified")}
@@ -3281,7 +3281,7 @@ func (df DataFrame) RightJoin(b DataFrame, keys ...string) DataFrame {
 }
 
 // OuterJoin returns a DataFrame containing the outer join of two DataFrames.
-// It uses a hash-join algorithm (O(n+m)) instead of a nested-loop (O(n*m)).
+// It uses a hash join with O(n+m+k) expected time, where k is the output size.
 func (df DataFrame) OuterJoin(b DataFrame, keys ...string) DataFrame {
 	if len(keys) == 0 {
 		return DataFrame{Err: fmt.Errorf("join keys not specified")}

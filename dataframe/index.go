@@ -7,6 +7,7 @@ package dataframe
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/dreamsxin/gota/series"
@@ -121,9 +122,8 @@ func (idx Index) String() string {
 // tuple of one label per level.
 type MultiIndex struct {
 	levels []Index
-	// codes[level][row] is the position within that level's label set.
-	// We store the full tuple as a string key for fast lookup.
-	keys []string // composite key per row
+	// keys contains a length-prefixed encoding of each row's full tuple.
+	keys []string
 }
 
 // NewMultiIndex builds a MultiIndex from a slice of label slices, one per level.
@@ -146,13 +146,13 @@ func NewMultiIndex(levels ...[]string) (MultiIndex, error) {
 	for i, lvl := range levels {
 		mi.levels[i] = NewIndex(lvl)
 	}
-	// Build composite key for each row.
+	// Build an unambiguous composite key for each row.
 	parts := make([]string, len(levels))
 	for row := 0; row < nrows; row++ {
 		for l, lvl := range levels {
 			parts[l] = lvl[row]
 		}
-		mi.keys[row] = strings.Join(parts, "\x00")
+		mi.keys[row] = encodeIndexKey(parts)
 	}
 	return mi, nil
 }
@@ -174,14 +174,33 @@ func (mi MultiIndex) Level(i int) Index {
 // Get returns all row positions matching the given tuple of labels.
 // The number of labels provided can be less than NLevels() for partial key lookup.
 func (mi MultiIndex) Get(labels ...string) []int {
+	if len(labels) > len(mi.levels) {
+		return nil
+	}
 	var out []int
-	prefix := strings.Join(labels, "\x00")
+	prefix := encodeIndexKey(labels)
 	for i, k := range mi.keys {
+		if len(labels) == len(mi.levels) {
+			if k == prefix {
+				out = append(out, i)
+			}
+			continue
+		}
 		if strings.HasPrefix(k, prefix) {
 			out = append(out, i)
 		}
 	}
 	return out
+}
+
+func encodeIndexKey(labels []string) string {
+	var sb strings.Builder
+	for _, label := range labels {
+		sb.WriteString(strconv.Itoa(len(label)))
+		sb.WriteByte(':')
+		sb.WriteString(label)
+	}
+	return sb.String()
 }
 
 // String implements the Stringer interface.
