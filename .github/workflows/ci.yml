@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, Go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        go: ['1.24.9', 'stable']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: gofmt
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      - name: test
+        run: go test -count=1 ./...
+
+  race:
+    name: race detector (ubuntu, CGO)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: go test -race
+        env:
+          CGO_ENABLED: 1
+        run: go test -race -count=1 ./...
+
+  fuzz:
+    name: fuzz smoke (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { pkg: ./dataframe, target: FuzzQuery }
+          - { pkg: ./dataframe, target: FuzzReadCSVDetectDelimiter }
+          - { pkg: ./dataframe, target: FuzzParquetRoundTrip }
+          - { pkg: ./series, target: FuzzBatchConvertStrings }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      # Short bounded run: exercises seed corpus plus randomized mutations.
+      # Crashers are written to testdata/fuzz and fail the build.
+      - name: fuzz ${{ matrix.target }}
+        run: go test -run='^$' -fuzz='^${{ matrix.target }}$' -fuzztime=60s ${{ matrix.pkg }}
+
+  bench:
+    name: benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: restore master baseline
+        uses: actions/cache@v4
+        with:
+          path: bench-baseline.txt
+          key: gota-bench-master-${{ github.sha }}
+          restore-keys: gota-bench-master-
+
+      - name: run benchmarks
+        run: |
+          go test -run='^$' -bench=. -benchmem -count=6 ./... | tee bench-current.txt
+
+      # Informational only: runner hardware varies, so regressions are
+      # reported in the job log rather than failing the build.
+      - name: compare against baseline
+        if: hashFiles('bench-baseline.txt') != ''
+        run: benchstat bench-baseline.txt bench-current.txt
+
+      - name: upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ github.sha }}
+          path: bench-current.txt
+
+      - name: update master baseline
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: cp bench-current.txt bench-baseline.txt
+
+      - name: save master baseline
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/cache/save@v4
+        with:
+          path: bench-baseline.txt
+          key: gota-bench-master-${{ github.sha }}

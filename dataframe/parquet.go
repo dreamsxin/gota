@@ -118,6 +118,15 @@ func ReadParquet(r io.ReaderAt, size int64) DataFrame {
 		}
 	}
 
+	if len(records) == 1 && len(names) > 0 {
+		// Header only: rebuild empty typed columns, which LoadRecords
+		// cannot express.
+		cols := make([]series.Series, len(names))
+		for i, name := range names {
+			cols[i] = series.New(nil, types[name], name).Empty()
+		}
+		return New(cols...)
+	}
 	return LoadRecords(records, WithTypes(types))
 }
 

@@ -1,0 +1,2 @@
+# Go fuzz corpus files must keep their exact bytes
+testdata/fuzz/** -text

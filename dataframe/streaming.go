@@ -340,6 +340,21 @@ func combineQueryMasks(left, right []bool, and bool) {
 	}
 }
 
+// indexASCIIFold returns the byte index of the first ASCII case-insensitive
+// match of sub in s, or -1. sub must be pure ASCII; the returned indexes stay
+// valid for slicing s even when s contains non-UTF-8 bytes.
+func indexASCIIFold(s, sub string) int {
+	if len(sub) == 0 || len(sub) > len(s) {
+		return -1
+	}
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if strings.EqualFold(s[i:i+len(sub)], sub) {
+			return i
+		}
+	}
+	return -1
+}
+
 // evalQueryClause evaluates a single "col op value" clause.
 func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 	cond = strings.TrimSpace(cond)
@@ -377,18 +392,18 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 		for _, candidate := range ops {
 			// Search case-insensitively, but require the operator to be surrounded
 			// by spaces (or at string boundaries) so that column names like
-			// "income" don't accidentally match "in".
-			lower := strings.ToLower(cond)
-			lc := strings.ToLower(candidate)
+			// "income" don't accidentally match "in". The search runs on cond
+			// itself: strings.ToLower can change the byte length of non-UTF-8
+			// input, which would desynchronize indexes against cond.
 			idx := 0
 			for {
-				pos := strings.Index(lower[idx:], lc)
+				pos := indexASCIIFold(cond[idx:], candidate)
 				if pos < 0 {
 					break
 				}
 				abs := idx + pos
-				before := abs == 0 || lower[abs-1] == ' '
-				after := abs+len(lc) >= len(lower) || lower[abs+len(lc)] == ' '
+				before := abs == 0 || cond[abs-1] == ' '
+				after := abs+len(candidate) >= len(cond) || cond[abs+len(candidate)] == ' '
 				if before && after {
 					colPart = strings.TrimSpace(cond[:abs])
 					valPart = strings.TrimSpace(cond[abs+len(candidate):])

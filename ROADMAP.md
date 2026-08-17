@@ -57,10 +57,13 @@ These items must remain backward-compatible within v1.x.
   DataFrame state/types; do not expand either API before this decision.
 - [ ] Split optional Excel, Parquet, and database adapters from the core package
   if this can be done without an import cycle or v1 API break.
-- [ ] Add fuzz/property tests for joins, indexes, Query parsing, type conversion,
-  and I/O round-trips.
-- [ ] Add supported-Go-version CI, race tests, documentation checks, and
-  benchmark regression reporting.
+- [x] Add supported-Go-version CI, race tests, and benchmark regression
+  reporting (GitHub Actions: gofmt/vet/test matrix on Go 1.24.9 and stable,
+  race job, benchstat comparison against the cached master baseline).
+- [ ] Add documentation checks and a release checklist job to CI.
+- [ ] Add fuzz/property tests for joins and indexes (Query parsing, CSV
+  delimiter detection, Parquet round-trips, and type conversion are fuzzed
+  in CI since the unreleased post-1.2.1 work).
 
 Exit criteria: documented contracts, compatibility tests, no known silent data
 corruption, and a release checklist runnable from a clean clone.

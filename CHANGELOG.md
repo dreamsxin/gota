@@ -7,6 +7,25 @@ This document follows
 
 ## [Unreleased]
 
+### Added
+
+- GitHub Actions CI: gofmt/vet/build/test matrix across Linux, Windows, and
+  macOS on Go 1.24.9 and stable, a race-detector job, short fuzz-smoke runs,
+  and a benchmark job that compares results against the cached master
+  baseline with benchstat.
+- Fuzz tests for Query expression parsing, CSV delimiter detection, Parquet
+  round-trips, and `BatchConvertStrings` type conversion.
+- Direct unit tests for the grouped-aggregation, factorization, Shift, Mode,
+  Skew, and Kurt fast paths (series statement coverage 56% -> 83%).
+
+### Fixed
+
+- `Query` no longer panics on non-UTF-8 expressions. The operator scan
+  previously used byte offsets from a `strings.ToLower` copy, whose length
+  can differ from the original string, causing a slice-bounds panic.
+- `ReadParquet` on a Parquet file with zero data rows now returns an empty
+  typed DataFrame instead of an "empty DataFrame" error.
+
 ## [1.2.1] - 2026-08-07
 
 This patch release contains the backward-compatible work since v1.2.0.
@@ -67,6 +86,34 @@ This patch release contains the backward-compatible work since v1.2.0.
   of panicking.
 - GroupBy transform row order, hidden group columns, ScanCSV batch ownership,
   sample order, NDJSON buffer size, and division-by-zero behavior.
+
+## [1.1.0] - 2026-03-16
+
+### Added
+
+- Excel (xlsx) read/write and SQL read/write adapters.
+- Hash-based join implementation and basic Index support.
+- Expanded rolling-window operations and exponentially weighted moving
+  (EWM) statistics for Series.
+- Additional Series and DataFrame extension methods with tests.
+
+## [1.0.0] - 2024-03-19
+
+First stable release line. The 1.0.x patch series (1.0.1 through 1.0.16,
+2024-03 to 2025-02) consolidated the following on top of 0.12.0:
+
+### Added
+
+- `DataFrame.Pivot`, `DataFrame.T`, `DataFrame.SliceRow`, `DataFrame.GetRow`,
+  and `DataFrame.Show`.
+- `Series.Fill`, `Series.FillNaN`, `Series.Sum`, `Series.Out`, and the `Time`
+  element type with load support.
+- `WithSkipColNames` load option and `mat` helpers (`Mul`, `Cal`) with `Add`
+  fixes.
+
+### Changed
+
+- Type detection (`findType`) and `Groups.Aggregation` improvements.
 
 ## [0.12.0] - 2021-10-10
 
