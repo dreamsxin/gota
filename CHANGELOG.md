@@ -5,7 +5,7 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 This document follows
 [markdownlint](https://github.com/markdownlint/markdownlint) formatting rules.
 
-## [Unreleased]
+## [1.2.2] - 2026-08-17
 
 ### Added
 
@@ -413,3 +413,5 @@ First stable release line. The 1.0.x patch series (1.0.1 through 1.0.16,
 [1.1.0]:https://github.com/dreamsxin/gota/compare/v1.0.0...v1.1.0
 [1.2.0]:https://github.com/dreamsxin/gota/compare/v1.1.0...v1.2.0
 [1.2.1]:https://github.com/dreamsxin/gota/compare/v1.2.0...v1.2.1
+
+[1.2.2]:https://github.com/dreamsxin/gota/compare/v1.2.1...v1.2.2
