@@ -71,6 +71,11 @@ jobs:
           - { pkg: ./dataframe, target: FuzzQuery }
           - { pkg: ./dataframe, target: FuzzReadCSVDetectDelimiter }
           - { pkg: ./dataframe, target: FuzzParquetRoundTrip }
+          - { pkg: ./dataframe, target: FuzzInnerJoinCount }
+          - { pkg: ./dataframe, target: FuzzInnerJoinCompositeCount }
+          - { pkg: ./dataframe, target: FuzzLeftJoinCount }
+          - { pkg: ./dataframe, target: FuzzIndexLoc }
+          - { pkg: ./dataframe, target: FuzzMultiIndexLoc }
           - { pkg: ./series, target: FuzzBatchConvertStrings }
     steps:
       - uses: actions/checkout@v4

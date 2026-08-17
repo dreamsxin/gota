@@ -5,6 +5,19 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 This document follows
 [markdownlint](https://github.com/markdownlint/markdownlint) formatting rules.
 
+## [Unreleased]
+
+### Added
+
+- Fuzz/property tests for joins (single-key and collision-prone composite-key
+  InnerJoin, LeftJoin row counts) and Index/MultiIndex lookups (full and
+  partial keys, separator-like labels), all validated against brute-force
+  references.
+- Ownership-contract tests pinning the documented behavior of mutating
+  operations (`Set`, `FillNaN`, `SetNames`), struct-copy column sharing,
+  `NewNoCopy` aliasing versus `New` copying, `Copy` protection, and sticky
+  error propagation.
+
 ## [1.2.2] - 2026-08-17
 
 ### Added

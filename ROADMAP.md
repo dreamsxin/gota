@@ -47,8 +47,10 @@ product goals.
 
 These items must remain backward-compatible within v1.x.
 
-- [ ] Define one ownership contract for `NewNoCopy`, mutating methods, and
-  concurrent access; add aliasing and race tests for the documented contract.
+- [x] Define one ownership contract for `NewNoCopy`, mutating methods, and
+  concurrent access; add aliasing and race tests for the documented contract
+  (contract documented in README; aliasing and sticky-error tests run under
+  the CI race job).
 - [ ] Apply the structured `Error` type consistently across public operations;
   retain sticky errors for v1 compatibility.
 - [ ] Define a public schema/DType model covering physical type, logical type,
@@ -61,9 +63,9 @@ These items must remain backward-compatible within v1.x.
   reporting (GitHub Actions: gofmt/vet/test matrix on Go 1.24.9 and stable,
   race job, benchstat comparison against the cached master baseline).
 - [ ] Add documentation checks and a release checklist job to CI.
-- [ ] Add fuzz/property tests for joins and indexes (Query parsing, CSV
-  delimiter detection, Parquet round-trips, and type conversion are fuzzed
-  in CI since the unreleased post-1.2.1 work).
+- [x] Add fuzz/property tests for joins and indexes (Query parsing, CSV
+  delimiter detection, Parquet round-trips, type conversion, join counts,
+  and Index/MultiIndex lookups are all fuzzed in CI).
 
 Exit criteria: documented contracts, compatibility tests, no known silent data
 corruption, and a release checklist runnable from a clean clone.
