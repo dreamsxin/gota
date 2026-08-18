@@ -51,7 +51,7 @@ type DataFrame struct {
 // NewNoCopy() if you can guarantee the input Series won't be modified.
 func New(se ...series.Series) DataFrame {
 	if len(se) == 0 {
-		return DataFrame{Err: fmt.Errorf("empty DataFrame")}
+		return DataFrame{Err: withSentinel("empty DataFrame", ErrEmptyDataFrame)}
 	}
 
 	// Pre-allocate columns slice with exact capacity
@@ -91,7 +91,7 @@ func New(se ...series.Series) DataFrame {
 //	df := dataframe.NewNoCopy(s1, s2) // No copy, more efficient
 func NewNoCopy(se ...series.Series) DataFrame {
 	if len(se) == 0 {
-		return DataFrame{Err: fmt.Errorf("empty DataFrame")}
+		return DataFrame{Err: withSentinel("empty DataFrame", ErrEmptyDataFrame)}
 	}
 
 	// Use input slices directly without copying
@@ -132,7 +132,7 @@ func checkColumnsDimensions(se ...series.Series) (nrows, ncols int, err error) {
 			nrows = s.Len()
 		}
 		if nrows != s.Len() {
-			err = fmt.Errorf("arguments have different dimensions")
+			err = withSentinel("arguments have different dimensions", ErrLengthMismatch)
 			return
 		}
 	}
@@ -336,7 +336,7 @@ func (df DataFrame) Set(indexes series.Indexes, newvalues DataFrame) DataFrame {
 		return DataFrame{Err: fmt.Errorf("argument has errors: %v", newvalues.Err)}
 	}
 	if df.ncols != newvalues.ncols {
-		return DataFrame{Err: fmt.Errorf("different number of columns")}
+		return DataFrame{Err: withSentinel("different number of columns", ErrLengthMismatch)}
 	}
 	columns := make([]series.Series, df.ncols)
 	for i, s := range df.columns {
@@ -415,12 +415,12 @@ func (df DataFrame) Select(indexes SelectIndexes) DataFrame {
 	}
 	idx, err := parseSelectIndexes(df.ncols, indexes, df.Names())
 	if err != nil {
-		return DataFrame{Err: fmt.Errorf("can't select columns: %v", err)}
+		return DataFrame{Err: fmt.Errorf("can't select columns: %w", err)}
 	}
 	columns := make([]series.Series, len(idx))
 	for k, i := range idx {
 		if i < 0 || i >= df.ncols {
-			return DataFrame{Err: fmt.Errorf("can't select columns: index out of range")}
+			return DataFrame{Err: withSentinel("can't select columns: index out of range", ErrIndexOutOfRange)}
 		}
 		columns[k] = df.columns[i].Copy()
 	}
@@ -448,7 +448,7 @@ func (df DataFrame) Drop(indexes SelectIndexes) DataFrame {
 	}
 	idx, err := parseSelectIndexes(df.ncols, indexes, df.Names())
 	if err != nil {
-		return DataFrame{Err: fmt.Errorf("can't select columns: %v", err)}
+		return DataFrame{Err: fmt.Errorf("can't select columns: %w", err)}
 	}
 	var columns []series.Series
 	for k, col := range df.columns {
@@ -707,7 +707,7 @@ func (gps Groups) Aggregation(typs []AggregationType, colnames []string) DataFra
 		switch typs[i] {
 		case Aggregation_MAX, Aggregation_MEAN, Aggregation_MEDIAN, Aggregation_MIN, Aggregation_STD, Aggregation_SUM, Aggregation_COUNT:
 		default:
-			return DataFrame{Err: fmt.Errorf("Aggregation: method %s not found", typs[i])}
+			return DataFrame{Err: withSentinel(fmt.Sprintf("Aggregation: method %s not found", typs[i]), ErrInvalidAggregation)}
 		}
 		aggIdxs[i] = idx
 	}
@@ -948,7 +948,7 @@ func (gps Groups) legacyAggregation(typs []AggregationType, colnames []string) D
 			case Aggregation_COUNT:
 				value = float64(curSeries.Len())
 			default:
-				return DataFrame{Err: fmt.Errorf("Aggregation: method %s not found", typs[i])}
+				return DataFrame{Err: withSentinel(fmt.Sprintf("Aggregation: method %s not found", typs[i]), ErrInvalidAggregation)}
 			}
 			curMap[buildAggregatedColname(c, typs[i])] = value
 		}
@@ -998,7 +998,7 @@ func (gps Groups) AggregationParallel(typs []AggregationType, colnames []string)
 		switch typs[i] {
 		case Aggregation_MAX, Aggregation_MEAN, Aggregation_MEDIAN, Aggregation_MIN, Aggregation_STD, Aggregation_SUM, Aggregation_COUNT:
 		default:
-			return DataFrame{Err: fmt.Errorf("AggregationParallel: method %s not found", typs[i])}
+			return DataFrame{Err: withSentinel(fmt.Sprintf("AggregationParallel: method %s not found", typs[i]), ErrInvalidAggregation)}
 		}
 		aggIdxs[i] = idx
 	}
@@ -1154,7 +1154,7 @@ func (gps Groups) Transform(colname string, f func(series.Series) series.Series)
 				return series.Series{Err: transformed.Err}, transformed.Err
 			}
 			if transformed.Len() != len(rows) {
-				err := fmt.Errorf("Transform: result length mismatch for group %s", key)
+				err := withSentinel(fmt.Sprintf("Transform: result length mismatch for group %s", key), ErrLengthMismatch)
 				return series.Series{Err: err}, err
 			}
 			if transformed.Len() > 0 && !typeSet {
@@ -1605,7 +1605,7 @@ func (df DataFrame) Rapply(f func(series.Series) series.Series) DataFrame {
 		}
 
 		if rowlen != -1 && rowlen != row.Len() {
-			return DataFrame{Err: fmt.Errorf("error applying function: rows have different lengths")}
+			return DataFrame{Err: withSentinel("error applying function: rows have different lengths", ErrLengthMismatch)}
 		}
 		rowlen = row.Len()
 
@@ -1750,7 +1750,7 @@ func (df DataFrame) RapplyParallel(f func(series.Series) series.Series) DataFram
 		if rowlen == -1 {
 			rowlen = len(r.elems)
 		} else if rowlen != len(r.elems) {
-			return DataFrame{Err: fmt.Errorf("RapplyParallel: rows have different lengths")}
+			return DataFrame{Err: withSentinel("RapplyParallel: rows have different lengths", ErrLengthMismatch)}
 		}
 		elements[r.idx] = r.elems
 	}
@@ -2158,10 +2158,10 @@ func LoadRecords(records [][]string, options ...LoadOption) DataFrame {
 	}
 
 	if len(records) == 0 {
-		return DataFrame{Err: fmt.Errorf("load records: empty DataFrame")}
+		return DataFrame{Err: withSentinel("load records: empty DataFrame", ErrEmptyDataFrame)}
 	}
 	if cfg.hasHeader && len(records) <= 1 {
-		return DataFrame{Err: fmt.Errorf("load records: empty DataFrame")}
+		return DataFrame{Err: withSentinel("load records: empty DataFrame", ErrEmptyDataFrame)}
 	}
 	if cfg.names != nil && len(cfg.names) != len(records[0]) {
 		if len(cfg.names) > len(records[0]) {
@@ -2634,7 +2634,7 @@ func (df DataFrame) Col(colname string) series.Series {
 	// Check that colname exist on dataframe
 	idx := findInStringSlice(colname, df.Names())
 	if idx < 0 {
-		return series.Series{Err: fmt.Errorf("unknown column name")}
+		return series.Series{Err: withSentinel("unknown column name", ErrColumnNotFound)}
 	}
 	return df.columns[idx].Copy()
 }
@@ -3129,12 +3129,12 @@ func (df DataFrame) Melt(idVars []string, valueVars []string, varName, valueName
 	// Validate columns.
 	for _, n := range idVars {
 		if df.ColIndex(n) < 0 {
-			return DataFrame{Err: fmt.Errorf("melt: id column %q not found", n)}
+			return DataFrame{Err: withSentinel(fmt.Sprintf("melt: id column %q not found", n), ErrColumnNotFound)}
 		}
 	}
 	for _, n := range valueVars {
 		if df.ColIndex(n) < 0 {
-			return DataFrame{Err: fmt.Errorf("melt: value column %q not found", n)}
+			return DataFrame{Err: withSentinel(fmt.Sprintf("melt: value column %q not found", n), ErrColumnNotFound)}
 		}
 	}
 
@@ -3190,7 +3190,7 @@ func (df DataFrame) Melt(idVars []string, valueVars []string, varName, valueName
 // It uses a hash join with O(n+m+k) expected time, where k is the output size.
 func (df DataFrame) InnerJoin(b DataFrame, keys ...string) DataFrame {
 	if len(keys) == 0 {
-		return DataFrame{Err: fmt.Errorf("join keys not specified")}
+		return DataFrame{Err: withSentinel("join keys not specified", ErrEmptyKeys)}
 	}
 	jk, err := resolveJoinKeys(df, b, keys)
 	if err != nil {
@@ -3216,7 +3216,7 @@ func (df DataFrame) InnerJoin(b DataFrame, keys ...string) DataFrame {
 // It uses a hash join with O(n+m+k) expected time, where k is the output size.
 func (df DataFrame) LeftJoin(b DataFrame, keys ...string) DataFrame {
 	if len(keys) == 0 {
-		return DataFrame{Err: fmt.Errorf("join keys not specified")}
+		return DataFrame{Err: withSentinel("join keys not specified", ErrEmptyKeys)}
 	}
 	jk, err := resolveJoinKeys(df, b, keys)
 	if err != nil {
@@ -3246,7 +3246,7 @@ func (df DataFrame) LeftJoin(b DataFrame, keys ...string) DataFrame {
 // It uses a hash join with O(n+m+k) expected time, where k is the output size.
 func (df DataFrame) RightJoin(b DataFrame, keys ...string) DataFrame {
 	if len(keys) == 0 {
-		return DataFrame{Err: fmt.Errorf("join keys not specified")}
+		return DataFrame{Err: withSentinel("join keys not specified", ErrEmptyKeys)}
 	}
 	jk, err := resolveJoinKeys(df, b, keys)
 	if err != nil {
@@ -3284,7 +3284,7 @@ func (df DataFrame) RightJoin(b DataFrame, keys ...string) DataFrame {
 // It uses a hash join with O(n+m+k) expected time, where k is the output size.
 func (df DataFrame) OuterJoin(b DataFrame, keys ...string) DataFrame {
 	if len(keys) == 0 {
-		return DataFrame{Err: fmt.Errorf("join keys not specified")}
+		return DataFrame{Err: withSentinel("join keys not specified", ErrEmptyKeys)}
 	}
 	jk, err := resolveJoinKeys(df, b, keys)
 	if err != nil {
@@ -3499,14 +3499,14 @@ func parseSelectIndexes(l int, indexes SelectIndexes, colnames []string) ([]int,
 	case string:
 		i := findInStringSlice(indexes, colnames)
 		if i < 0 {
-			return nil, fmt.Errorf("can't select columns: column name %q not found", indexes)
+			return nil, withSentinel(fmt.Sprintf("column name %q not found", indexes), ErrColumnNotFound)
 		}
 		idx = append(idx, i)
 	case []string:
 		for _, s := range indexes {
 			i := findInStringSlice(s, colnames)
 			if i < 0 {
-				return nil, fmt.Errorf("can't select columns: column name %q not found", s)
+				return nil, withSentinel(fmt.Sprintf("column name %q not found", s), ErrColumnNotFound)
 			}
 			idx = append(idx, i)
 		}

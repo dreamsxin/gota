@@ -9,6 +9,12 @@ This document follows
 
 ### Added
 
+- `errors.Is` matching for the exported sentinel errors. Core failure paths
+  (empty frames, unknown columns, out-of-range indexes, length mismatches,
+  join key problems, invalid aggregations, missing index labels) now wrap
+  `ErrEmptyDataFrame`, `ErrColumnNotFound`, `ErrIndexOutOfRange`,
+  `ErrLengthMismatch`, `ErrKeyNotFound`, `ErrEmptyKeys`, and
+  `ErrInvalidAggregation` without changing any message text.
 - Fuzz/property tests for joins (single-key and collision-prone composite-key
   InnerJoin, LeftJoin row counts) and Index/MultiIndex lookups (full and
   partial keys, separator-like labels), all validated against brute-force
@@ -17,6 +23,12 @@ This document follows
   operations (`Set`, `FillNaN`, `SetNames`), struct-copy column sharing,
   `NewNoCopy` aliasing versus `New` copying, `Copy` protection, and sticky
   error propagation.
+
+### Fixed
+
+- `Select`/`Drop` with an unknown column name no longer emit a doubled
+  "can't select columns: can't select columns: ..." prefix, and the wrapped
+  error chain now uses `%w` so `errors.Is` sees through the operation prefix.
 
 ## [1.2.2] - 2026-08-17
 

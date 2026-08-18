@@ -33,8 +33,9 @@ notes when upgrading.
   - [Parquet I/O](#parquet-io)
   - [SQL I/O](#sql-io)
   - [Index & MultiIndex](#index--multiindex)
-  - [Chaining operations](#chaining-operations)
-  - [Print to console](#print-to-console)
+- [Chaining operations](#chaining-operations)
+- [Error handling](#error-handling)
+- [Print to console](#print-to-console)
   - [Interfacing with gonum](#interfacing-with-gonum)
   - [Data Exploration](#data-exploration)
   - [Missing Data Handling](#missing-data-handling)
@@ -518,6 +519,27 @@ if a.Err != nil {
     log.Fatal(a.Err)
 }
 ```
+
+### Error handling
+
+Common failure kinds wrap exported sentinel errors, so `errors.Is` works
+while message text stays stable:
+
+```go
+import "errors"
+
+col := df.Col("missing")
+if errors.Is(col.Err, dataframe.ErrColumnNotFound) {
+    // handle missing column
+}
+
+sel := df.Select([]string{"missing"})
+if errors.Is(sel.Err, dataframe.ErrColumnNotFound) { /* ... */ }
+```
+
+Available sentinels include `ErrEmptyDataFrame`, `ErrColumnNotFound`,
+`ErrIndexOutOfRange`, `ErrLengthMismatch`, `ErrKeyNotFound` (join keys and
+index labels), `ErrEmptyKeys`, and `ErrInvalidAggregation`.
 
 ### Save a DataFrame to file
 

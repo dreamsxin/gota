@@ -76,11 +76,11 @@ func (idx Index) GetFirst(label string) int {
 func (idx Index) Slice(start, end string) ([]int, error) {
 	si := idx.GetFirst(start)
 	if si < 0 {
-		return nil, fmt.Errorf("index slice: start label %q not found", start)
+		return nil, withSentinel(fmt.Sprintf("index slice: start label %q not found", start), ErrKeyNotFound)
 	}
 	ei := idx.GetFirst(end)
 	if ei < 0 {
-		return nil, fmt.Errorf("index slice: end label %q not found", end)
+		return nil, withSentinel(fmt.Sprintf("index slice: end label %q not found", end), ErrKeyNotFound)
 	}
 	if si > ei {
 		return nil, fmt.Errorf("index slice: start %q is after end %q", start, end)
@@ -255,7 +255,7 @@ func (idf IndexedDataFrame) Index() Index { return idf.index }
 func (idf IndexedDataFrame) Loc(label string) DataFrame {
 	positions := idf.index.Get(label)
 	if len(positions) == 0 {
-		return DataFrame{Err: fmt.Errorf("loc: label %q not found", label)}
+		return DataFrame{Err: withSentinel(fmt.Sprintf("loc: label %q not found", label), ErrKeyNotFound)}
 	}
 	return idf.df.Subset(positions)
 }
@@ -309,7 +309,7 @@ func (midf MultiIndexedDataFrame) MultiIndex() MultiIndex { return midf.index }
 func (midf MultiIndexedDataFrame) Loc(labels ...string) DataFrame {
 	positions := midf.index.Get(labels...)
 	if len(positions) == 0 {
-		return DataFrame{Err: fmt.Errorf("loc: key %v not found", labels)}
+		return DataFrame{Err: withSentinel(fmt.Sprintf("loc: key %v not found", labels), ErrKeyNotFound)}
 	}
 	return midf.df.Subset(positions)
 }

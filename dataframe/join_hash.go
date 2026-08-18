@@ -39,7 +39,7 @@ func resolveJoinKeys(a, b DataFrame, keys []string) (joinKeys, error) {
 		jk.iKeysB = append(jk.iKeysB, j)
 	}
 	if len(errArr) != 0 {
-		return jk, fmt.Errorf("%s", strings.Join(errArr, "\n"))
+		return jk, withSentinel(strings.Join(errArr, "\n"), ErrKeyNotFound)
 	}
 
 	// Key columns come first in output.

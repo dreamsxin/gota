@@ -52,7 +52,9 @@ These items must remain backward-compatible within v1.x.
   (contract documented in README; aliasing and sticky-error tests run under
   the CI race job).
 - [ ] Apply the structured `Error` type consistently across public operations;
-  retain sticky errors for v1 compatibility.
+  retain sticky errors for v1 compatibility. Core failure paths now wrap the
+  exported sentinels for `errors.Is` with unchanged messages; remaining work
+  is the long tail of minor `fmt.Errorf` sites and I/O adapter errors.
 - [ ] Define a public schema/DType model covering physical type, logical type,
   and nullability.
 - [ ] Define whether Index and Categorical remain adapters or become native

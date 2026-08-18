@@ -509,7 +509,7 @@ func (df DataFrame) ClipColumn(colname string, lower, upper *float64) DataFrame 
 
 	idx := df.ColIndex(colname)
 	if idx < 0 {
-		return DataFrame{Err: fmt.Errorf("clip: column %q not found", colname)}
+		return DataFrame{Err: withSentinel(fmt.Sprintf("clip: column %q not found", colname), ErrColumnNotFound)}
 	}
 
 	col := df.columns[idx]
@@ -589,7 +589,7 @@ func (df DataFrame) ReplaceInColumn(colname string, toReplace, with interface{})
 
 	idx := df.ColIndex(colname)
 	if idx < 0 {
-		return DataFrame{Err: fmt.Errorf("replace: column %q not found", colname)}
+		return DataFrame{Err: withSentinel(fmt.Sprintf("replace: column %q not found", colname), ErrColumnNotFound)}
 	}
 
 	col := df.columns[idx]
@@ -833,7 +833,7 @@ func (df DataFrame) ExplodeOn(colname, sep string) DataFrame {
 	}
 	idx := df.ColIndex(colname)
 	if idx < 0 {
-		return DataFrame{Err: fmt.Errorf("ExplodeOn: column %q not found", colname)}
+		return DataFrame{Err: withSentinel(fmt.Sprintf("ExplodeOn: column %q not found", colname), ErrColumnNotFound)}
 	}
 
 	// Build new columns: same types, empty.
@@ -882,7 +882,7 @@ func (df DataFrame) RenameAll(mapping map[string]string) (DataFrame, error) {
 	for oldName, newName := range mapping {
 		idx := result.ColIndex(oldName)
 		if idx < 0 {
-			return DataFrame{}, fmt.Errorf("RenameAll: column %q not found", oldName)
+			return DataFrame{}, withSentinel(fmt.Sprintf("RenameAll: column %q not found", oldName), ErrColumnNotFound)
 		}
 		result.columns[idx].Name = newName
 	}

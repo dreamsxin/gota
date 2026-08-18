@@ -302,7 +302,7 @@ func buildSQLUpsertClause(colNames []string, cfg sqlInsertOptions) (string, erro
 	}
 	for _, name := range cfg.upsertConflict {
 		if _, ok := colSet[name]; !ok {
-			return "", fmt.Errorf("WriteSQL: upsert conflict column %q not found", name)
+			return "", withSentinel(fmt.Sprintf("WriteSQL: upsert conflict column %q not found", name), ErrColumnNotFound)
 		}
 	}
 

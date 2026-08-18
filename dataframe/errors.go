@@ -100,3 +100,19 @@ func (e *Error) Error() string {
 func (e *Error) Unwrap() error {
 	return e.Err
 }
+
+// withSentinel returns an error whose message is exactly msg but which also
+// matches sentinel through errors.Is. It wires public operations to the
+// sentinel errors above without changing any existing message text.
+func withSentinel(msg string, sentinel error) error {
+	return &sentinelError{msg: msg, sentinel: sentinel}
+}
+
+type sentinelError struct {
+	msg      string
+	sentinel error
+}
+
+func (e *sentinelError) Error() string { return e.msg }
+
+func (e *sentinelError) Unwrap() error { return e.sentinel }
