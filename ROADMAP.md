@@ -43,18 +43,20 @@ product goals.
 - [x] Time Series support and standalone dictionary-encoded Categorical values.
 - [x] Basic Index and MultiIndex wrappers for label-based lookup.
 
-## Next: API and Schema Reliability
+## Completed in v1.3.0: API and Schema Reliability
 
-These items must remain backward-compatible within v1.x.
+All items landed in the v1.3.0 release (2026-08-18) and stay backward-
+compatible within v1.x.
 
 - [x] Define one ownership contract for `NewNoCopy`, mutating methods, and
   concurrent access; add aliasing and race tests for the documented contract
   (contract documented in README; aliasing and sticky-error tests run under
   the CI race job).
-- [ ] Apply the structured `Error` type consistently across public operations;
-  retain sticky errors for v1 compatibility. Core failure paths now wrap the
-  exported sentinels for `errors.Is` with unchanged messages; remaining work
-  is the long tail of minor `fmt.Errorf` sites and I/O adapter errors.
+- [x] Apply the structured `Error` type consistently across public operations;
+  retain sticky errors for v1 compatibility. Core operations and the I/O
+  adapters (Query, Excel, SQL) wrap the exported sentinels for `errors.Is`
+  with unchanged messages; tokenizer-level parse errors keep plain messages
+  because they have no distinct matchable kinds.
 - [x] Define a public schema/DType model covering physical type, logical type,
   and nullability (see Design Decisions; `dataframe.Schema` ships the
   physical-type and nullability surface, logical types extend it with the
@@ -77,7 +79,9 @@ These items must remain backward-compatible within v1.x.
   and Index/MultiIndex lookups are all fuzzed in CI).
 
 Exit criteria: documented contracts, compatibility tests, no known silent data
-corruption, and a release checklist runnable from a clean clone.
+corruption, and a release checklist runnable from a clean clone - all met as
+of v1.3.0. The next milestone is the Columnar Kernel RFC below; until it
+starts, v1.x work is limited to fixes and non-breaking additions.
 
 ## Design Decisions (v1.x)
 
