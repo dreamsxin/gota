@@ -55,12 +55,17 @@ These items must remain backward-compatible within v1.x.
   retain sticky errors for v1 compatibility. Core failure paths now wrap the
   exported sentinels for `errors.Is` with unchanged messages; remaining work
   is the long tail of minor `fmt.Errorf` sites and I/O adapter errors.
-- [ ] Define a public schema/DType model covering physical type, logical type,
-  and nullability.
-- [ ] Define whether Index and Categorical remain adapters or become native
-  DataFrame state/types; do not expand either API before this decision.
-- [ ] Split optional Excel, Parquet, and database adapters from the core package
-  if this can be done without an import cycle or v1 API break.
+- [x] Define a public schema/DType model covering physical type, logical type,
+  and nullability (see Design Decisions; `dataframe.Schema` ships the
+  physical-type and nullability surface, logical types extend it with the
+  columnar kernel).
+- [x] Define whether Index and Categorical remain adapters or become native
+  DataFrame state/types; do not expand either API before this decision
+  (decision: adapters through v1.x, see Design Decisions).
+- [x] Split optional Excel, Parquet, and database adapters from the core package
+  if this can be done without an import cycle or v1 API break (decision: not
+  feasible without a break, deferred to the v2 kernel line, see Design
+  Decisions).
 - [x] Add supported-Go-version CI, race tests, and benchmark regression
   reporting (GitHub Actions: gofmt/vet/test matrix on Go 1.24.9 and stable,
   race job, benchstat comparison against the cached master baseline).
@@ -71,6 +76,41 @@ These items must remain backward-compatible within v1.x.
 
 Exit criteria: documented contracts, compatibility tests, no known silent data
 corruption, and a release checklist runnable from a clean clone.
+
+## Design Decisions (v1.x)
+
+These decisions close the open design questions above for the v1 line.
+
+### Schema/DType model
+
+`dataframe.Schema` is the public column-layout surface: an ordered list of
+`Field{Name, Type, Nullable}` backed by `series.Type`. In v1.x every column is
+nullable, so `Nullable` is always true; it exists so the columnar kernel can
+introduce non-nullable buffers without another API change. Logical types
+(Decimal, ordered Enum) are deferred to the kernel milestone and will extend
+`Field`, not replace it. `Schema.Equal` is the supported way to check join and
+concat compatibility; `FromSchema` builds conforming empty frames for output
+buffers and streaming accumulators.
+
+### Index and Categorical stay adapters
+
+`IndexedDataFrame`, `MultiIndexedDataFrame`, and `series.Categorical` remain
+wrappers through v1.x. Promoting them to native DataFrame state would change
+the `DataFrame` struct and every transformation's propagation rules - a
+breaking change with unclear semantics (which columns survive a Mutate?). They
+become candidates for native state only as part of the v2 columnar kernel,
+where validity and dictionary encoding are storage-level concerns. Until then
+their APIs stay as-is; no expansion.
+
+### Adapter split is deferred to v2
+
+Excel (excelize), Parquet (parquet-go), and SQL adapters live in the core
+`dataframe` package and directly import their heavy dependencies. Removing
+those dependencies from the core module requires moving `WriteParquet`,
+`ReadXLSX`, `WriteSQL`, and friends out of `package dataframe` - an API break.
+Thin wrappers cannot help: a wrapper import keeps the dependency in the graph,
+so there is no dependency-weight win without the break. The split lands with
+the v2 module reorganization if the kernel work proceeds.
 
 ## Later: Columnar Kernel RFC
 

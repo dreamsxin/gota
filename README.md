@@ -16,6 +16,7 @@ notes when upgrading.
   - [Get row data](#get-row-data)
   - [Subsetting & Slicing](#subsetting--slicing)
   - [Column selection](#column-selection)
+  - [Schema](#schema)
   - [Updating values](#updating-values)
   - [Filtering](#filtering)
   - [GroupBy, Aggregation, Apply & Transform](#groupby-aggregation-apply--transform)
@@ -197,6 +198,27 @@ sel1 := df.Select([]int{0, 2})
 sel2 := df.Select([]string{"A", "C"})
 dropped := df.Drop([]string{"B"})
 ```
+
+### Schema
+
+`Schema` is the ordered column layout: name, physical type, and nullability.
+Use it to check join/concat compatibility or to build conforming empty frames
+for output buffers.
+
+```go
+sch := df.Schema()
+
+sch.Names()  // []string{"A", "B"}
+sch.Types()  // []series.Type{series.String, series.Int}
+sch.Field("A")         // (Field, bool)
+sch.Equal(otherSchema) // fast layout compatibility check
+
+// Zero-row frame with the same layout (streaming accumulators, output buffers)
+empty := dataframe.FromSchema(sch)
+```
+
+Every v1.x column is nullable (`Field.Nullable` is always `true`); the field
+exists so future non-nullable storage can appear without an API change.
 
 ### Updating values
 

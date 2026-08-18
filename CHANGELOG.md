@@ -9,6 +9,11 @@ This document follows
 
 ### Added
 
+- Public schema model: `dataframe.Schema` and `dataframe.Field` expose the
+  ordered column layout (name, physical type, nullability) with `Names`,
+  `Types`, `Field`, and `Equal` for join/concat compatibility checks;
+  `FromSchema` builds conforming zero-row frames for output buffers and
+  streaming accumulators.
 - `errors.Is` matching for the exported sentinel errors. Core failure paths
   (empty frames, unknown columns, out-of-range indexes, length mismatches,
   join key problems, invalid aggregations, missing index labels) now wrap
