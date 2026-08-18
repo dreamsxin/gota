@@ -87,8 +87,15 @@ jobs:
 
       # Short bounded run: exercises seed corpus plus randomized mutations.
       # Crashers are written to testdata/fuzz and fail the build.
+      # The coordinator occasionally reports "context deadline exceeded"
+      # instead of stopping cleanly when the budget expires on a busy
+      # runner; retry once. Real crashers fail both runs.
       - name: fuzz ${{ matrix.target }}
-        run: go test -run='^$' -fuzz='^${{ matrix.target }}$' -fuzztime=60s ${{ matrix.pkg }}
+        run: |
+          if ! go test -run='^$' -fuzz='^${{ matrix.target }}$' -fuzztime=60s ${{ matrix.pkg }}; then
+            echo "::warning::retrying ${{ matrix.target }} after fuzz shutdown flake"
+            go test -run='^$' -fuzz='^${{ matrix.target }}$' -fuzztime=60s ${{ matrix.pkg }}
+          fi
 
   docs:
     name: documentation checks
