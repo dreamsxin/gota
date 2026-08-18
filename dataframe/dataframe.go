@@ -448,7 +448,7 @@ func (df DataFrame) Drop(indexes SelectIndexes) DataFrame {
 	}
 	idx, err := parseSelectIndexes(df.ncols, indexes, df.Names())
 	if err != nil {
-		return DataFrame{Err: fmt.Errorf("can't select columns: %w", err)}
+		return DataFrame{Err: fmt.Errorf("can't drop columns: %w", err)}
 	}
 	var columns []series.Series
 	for k, col := range df.columns {

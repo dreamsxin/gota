@@ -5,6 +5,24 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 This document follows
 [markdownlint](https://github.com/markdownlint/markdownlint) formatting rules.
 
+## [1.3.1] - 2026-08-18
+
+### Fixed
+
+- `Drop` with an unknown column now reports `can't drop columns: ...`
+  instead of the misleading `can't select columns: ...` prefix; sentinel
+  matching via `errors.Is` is unchanged.
+
+### Documentation
+
+- README warns that `Col` returns a detached copy - modifications never
+  write back to the DataFrame - and shows the supported ways to update a
+  column (`Mutate`, `Assign`, `Set`).
+- README spells out `NewNoCopy`'s exact aliasing semantics: element writes
+  through `Series.Set` are visible, `Series.Append` is not.
+- README notes that Excel/Parquet/SQL adapter dependencies are part of the
+  module graph even for core-only users (split deferred to v2).
+
 ## [1.3.0] - 2026-08-18
 
 ### Added
@@ -450,3 +468,4 @@ First stable release line. The 1.0.x patch series (1.0.1 through 1.0.16,
 
 [1.2.2]:https://github.com/dreamsxin/gota/compare/v1.2.1...v1.2.2
 [1.3.0]:https://github.com/dreamsxin/gota/compare/v1.2.2...v1.3.0
+[1.3.1]:https://github.com/dreamsxin/gota/compare/v1.3.0...v1.3.1

@@ -33,6 +33,7 @@ func TestSentinelErrors(t *testing.T) {
 		).Err, ErrLengthMismatch},
 		{"Col unknown", errDF.Col("missing").Err, ErrColumnNotFound},
 		{"Select unknown name", errDF.Select([]string{"missing"}).Err, ErrColumnNotFound},
+		{"Drop unknown name", errDF.Drop([]string{"missing"}).Err, ErrColumnNotFound},
 		{"Select out of range", errDF.Select([]int{99}).Err, ErrIndexOutOfRange},
 		{"Set column count mismatch", errDF.Set([]int{0}, LoadRecords([][]string{
 			{"key", "num", "extra"},
@@ -97,7 +98,8 @@ func TestSentinelErrorsPreserveMessages(t *testing.T) {
 	}{
 		{New().Err, "empty DataFrame"},
 		{errDF.Col("missing").Err, "unknown column name"},
-		{errDF.Select([]string{"missing"}).Err, `can't select columns: column name "missing" not found`}, {errDF.InnerJoin(errDF).Err, "join keys not specified"},
+		{errDF.Select([]string{"missing"}).Err, `can't select columns: column name "missing" not found`},
+		{errDF.Drop([]string{"missing"}).Err, `can't drop columns: column name "missing" not found`}, {errDF.InnerJoin(errDF).Err, "join keys not specified"},
 		{errDF.InnerJoin(errDF, "missing").Err, `can't find key "missing" on left DataFrame` + "\n" + `can't find key "missing" on right DataFrame`},
 	}
 	for _, tc := range table {

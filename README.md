@@ -85,6 +85,12 @@ Requires Go 1.24.9+. Key dependencies:
 | `modernc.org/sqlite` | SQL tests (pure Go SQLite) |
 | `github.com/olekukonko/tablewriter` | Table formatting |
 
+Note: the Excel, Parquet, and SQL adapters live in the core `dataframe`
+package, so their dependencies appear in `go.mod` even if you only use
+in-memory operations or CSV/JSON. Go only compiles what you import, but the
+module graph and downloads include all of them; splitting the adapters
+requires an API break and is deferred to v2 (see ROADMAP design decisions).
+
 ---
 
 DataFrame
@@ -197,6 +203,19 @@ sub := df.SliceRow(1, 4)            // rows [1, 4) half-open range
 sel1 := df.Select([]int{0, 2})
 sel2 := df.Select([]string{"A", "C"})
 dropped := df.Drop([]string{"B"})
+```
+
+**`Col` returns a copy.** `df.Col("x")` hands you a detached copy of the
+column - modifying it never writes back to the DataFrame, and nothing errors:
+
+```go
+col := df.Col("x")
+col.Set([]int{0}, series.New([]int{9}, series.Int, "x")) // silently discarded
+
+// To change a column, replace it on the frame instead:
+df = df.Mutate(series.New([]int{9, 1}, series.Int, "x"))  // replace by name
+df = df.Assign("x2", func(d dataframe.DataFrame) series.Series { ... })
+df = df.Set([]int{0}, replacementFrame)                    // cell-level
 ```
 
 ### Schema
@@ -525,8 +544,13 @@ Most transformation methods return a new DataFrame. `DataFrame.Set`,
 `DataFrame.FillNaN`, and `DataFrame.SetNames` mutate shared column storage;
 `Series.Set`, `Series.Append`, and `Series.FillNaN` also mutate the original
 Series. Call `Copy` before these methods when the original value must remain
-unchanged. `NewNoCopy` aliases its input Series and requires exclusive lifecycle
-control.
+unchanged.
+
+`NewNoCopy` shares the element storage of its input Series, not the Series
+headers: in-place element writes (`Series.Set`) are visible through the
+DataFrame, but `Series.Append` reassigns the slice header and is **not**
+visible. The safe rule is to stop touching the Series after handing it to
+`NewNoCopy`.
 
 DataFrame-returning operations propagate sticky errors: once an error occurs,
 subsequent chain operations become no-ops until the error is inspected:
