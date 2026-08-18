@@ -5,6 +5,28 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 This document follows
 [markdownlint](https://github.com/markdownlint/markdownlint) formatting rules.
 
+## [1.4.0] - 2026-08-18
+
+### Added
+
+- Series string operations: `Upper`, `Lower`, `TrimSpace`, `Trim`,
+  `TrimPrefix`, `TrimSuffix`, and substring-level `ReplaceAll`, plus the
+  Bool-producing predicates `Contains`, `StartsWith`, and `EndsWith`. NaN
+  elements propagate; non-String inputs set Err. Value-level replacement
+  stays on `Series.Replace`.
+- Series Time accessors: `Year`, `Month`, `Day`, `Hour`, `Minute`, `Second`,
+  and `Weekday` (Sunday = 0) return Int series from Time series; non-Time
+  inputs set Err.
+- DataFrame-level `Rolling(window)` (Mean/Sum/Min/Max/StdDev) and
+  `EWM(span)` / `EWMAlpha(alpha)` (Mean/Var/Std) builders. Without a column
+  list every numeric column is transformed and the rest pass through
+  unchanged; explicit column lists must be numeric and existing columns
+  (`ErrTypeMismatch`, `ErrColumnNotFound` via `errors.Is`).
+- Variadic `Concat` (vertical, unmatched columns become NaN) and
+  `ConcatColumns` (horizontal, CBind semantics) free functions.
+- `FillNaNStrategy` and `FillNaNStrategyLimit` aliases matching the
+  Series-side `FillNaN` spelling.
+
 ## [1.3.1] - 2026-08-18
 
 ### Fixed
@@ -469,3 +491,4 @@ First stable release line. The 1.0.x patch series (1.0.1 through 1.0.16,
 [1.2.2]:https://github.com/dreamsxin/gota/compare/v1.2.1...v1.2.2
 [1.3.0]:https://github.com/dreamsxin/gota/compare/v1.2.2...v1.3.0
 [1.3.1]:https://github.com/dreamsxin/gota/compare/v1.3.0...v1.3.1
+[1.4.0]:https://github.com/dreamsxin/gota/compare/v1.3.1...v1.4.0

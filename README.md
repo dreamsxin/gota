@@ -24,9 +24,11 @@ notes when upgrading.
   - [Arrange](#arrange)
   - [Mutate](#mutate)
   - [Joins](#joins)
+  - [Concat](#concat)
   - [Function application](#function-application)
   - [Cumulative statistics](#cumulative-statistics-dataframe)
   - [Diff & PctChange](#diff--pctchange-dataframe)
+  - [Rolling & EWM (DataFrame)](#rolling--ewm-dataframe)
   - [FillNA with strategy and limit](#fillna-with-strategy-and-limit)
   - [Correlation & Covariance](#correlation--covariance-dataframe)
   - [Melt (wide → long)](#melt-wide--long)
@@ -51,6 +53,8 @@ notes when upgrading.
   - [Diff & PctChange](#diff--pctchange-series)
   - [Correlation & Covariance](#correlation--covariance-series)
   - [Type Conversion](#type-conversion)
+  - [String operations](#string-operations)
+  - [Time accessors](#time-accessors)
   - [Categorical](#categorical)
 - [Additional DataFrame APIs (v1.2.1)](#additional-dataframe-apis-v121)
   - [Shift](#shift)
@@ -370,6 +374,16 @@ mut := df.Mutate(series.New([]string{"a", "b", "c", "d"}, series.String, "C"))
 join := df.InnerJoin(df2, "D")
 ```
 
+### Concat
+
+Variadic stacking in both directions; a single frame is copied, and sticky
+errors propagate:
+
+```go
+all := dataframe.Concat(a, b, c)         // vertical; unmatched columns -> NaN
+wide := dataframe.ConcatColumns(a, b, c) // horizontal; CBind semantics
+```
+
 ### Function application
 
 ```go
@@ -397,6 +411,25 @@ diffDF := df.Diff(1)                        // row[i] - row[i-1]
 pct    := df.PctChange(2, "close", "volume") // % change over 2 periods
 ```
 
+### Rolling & EWM (DataFrame)
+
+DataFrame-level builders mirror the Series API. Without a column list every
+numeric column is transformed and other columns pass through unchanged; an
+explicit column list must name numeric columns or the call errors
+(`ErrTypeMismatch`, `ErrColumnNotFound` via `errors.Is`).
+
+```go
+rolled := df.Rolling(3).Mean()               // all numeric columns
+rolled := df.Rolling(3).StdDev("close", "volume")
+
+smooth := df.EWM(3).Mean()                   // span convention matches pandas
+smooth := df.EWMAlpha(0.5).Mean("close")     // explicit alpha
+vol    := df.EWM(3).Std("close")
+```
+
+Rolling statistics: `Mean`, `Sum`, `Min`, `Max`, `StdDev`. EWM statistics:
+`Mean`, `Var`, `Std`.
+
 ### FillNA with strategy and limit
 
 ```go
@@ -410,6 +443,8 @@ filled := df.FillNAStrategyLimit(dataframe.NAFillBackward, 0, "col1", "col2")
 Also available: `df.FillNAStrategy(strategy, subset...)` (no limit),
 `df.DropNA(how, subset...)` to drop rows with missing values,
 `df.DropDuplicates(subset...)` to remove duplicate rows.
+`FillNaNStrategy` / `FillNaNStrategyLimit` are spelling-compatible aliases
+matching the Series-side `FillNaN` naming.
 
 ### Correlation & Covariance (DataFrame)
 
@@ -929,6 +964,48 @@ filtered, err := cat.Filter([]bool{true, false, true, false})
 
 // Memory estimate
 bytes := cat.MemoryBytes()
+```
+
+### String operations
+
+Transformations return a new String series (NaN stays NaN); predicates return
+a Bool series. Calling them on a non-String series sets Err.
+
+```go
+s := series.New([]string{"Go", " py ", nil}, series.String, "lang")
+
+s.Upper()               // ["GO", " PY ", NaN]
+s.Lower()
+s.TrimSpace()           // ["Go", "py", NaN]
+s.Trim("G")
+s.TrimPrefix("G")
+s.TrimSuffix(" ")
+s.ReplaceAll("o", "0")  // substring replace; Series.Replace replaces values
+
+s.Contains("o")         // [true, false, NaN]
+s.StartsWith("G")
+s.EndsWith(" ")
+```
+
+### Time accessors
+
+Each accessor returns an Int series from a Time series (NaN stays NaN);
+`Weekday` follows `time.Weekday` numbering (Sunday = 0). Calling them on a
+non-Time series sets Err.
+
+```go
+t := series.New(
+    []interface{}{time.Date(2024, 3, 5, 14, 30, 45, 0, time.UTC), nil},
+    series.Time, "ts",
+)
+
+t.Year()    // [2024, NaN]
+t.Month()   // [3, NaN]
+t.Day()     // [5, NaN]
+t.Hour()    // [14, NaN]
+t.Minute()
+t.Second()
+t.Weekday() // [2, NaN]  (Tuesday)
 ```
 
 ---
