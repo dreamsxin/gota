@@ -19,7 +19,11 @@ This document follows
   join key problems, invalid aggregations, missing index labels) now wrap
   `ErrEmptyDataFrame`, `ErrColumnNotFound`, `ErrIndexOutOfRange`,
   `ErrLengthMismatch`, `ErrKeyNotFound`, `ErrEmptyKeys`, and
-  `ErrInvalidAggregation` without changing any message text.
+  `ErrInvalidAggregation` without changing any message text. Query unknown
+  columns, XLSX style columns, and empty Excel sheets follow in this release.
+- Documentation checks and a release checklist: README and ROADMAP anchor
+  links are verified as part of the test suite (`internal/doccheck`), and CI
+  requires the latest tag to have a dated CHANGELOG heading.
 - Fuzz/property tests for joins (single-key and collision-prone composite-key
   InnerJoin, LeftJoin row counts) and Index/MultiIndex lookups (full and
   partial keys, separator-like labels), all validated against brute-force

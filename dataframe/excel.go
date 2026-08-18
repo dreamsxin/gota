@@ -54,7 +54,7 @@ func ReadXLSX(r io.Reader, options ...LoadOption) DataFrame {
 	if sheetName == "" {
 		sheets := f.GetSheetList()
 		if len(sheets) == 0 {
-			return DataFrame{Err: fmt.Errorf("ReadXLSX: workbook has no sheets")}
+			return DataFrame{Err: withSentinel("ReadXLSX: workbook has no sheets", ErrEmptyDataFrame)}
 		}
 		sheetName = sheets[0]
 	}
@@ -68,7 +68,7 @@ func readXLSXSheet(f *excelize.File, sheetName string, options ...LoadOption) Da
 		return DataFrame{Err: fmt.Errorf("ReadXLSX: %v", err)}
 	}
 	if len(rows) == 0 {
-		return DataFrame{Err: fmt.Errorf("ReadXLSX: sheet %q is empty", sheetName)}
+		return DataFrame{Err: withSentinel(fmt.Sprintf("ReadXLSX: sheet %q is empty", sheetName), ErrEmptyDataFrame)}
 	}
 
 	// Normalise all rows to the same width.
@@ -141,7 +141,7 @@ func (df DataFrame) WriteXLSX(w io.Writer, options ...WriteOption) error {
 	}
 
 	if err := writeXLSXToSheet(f, sheetName, df, cfg); err != nil {
-		return fmt.Errorf("WriteXLSX: %v", err)
+		return fmt.Errorf("WriteXLSX: %w", err)
 	}
 
 	_, err := f.WriteTo(w)
@@ -173,7 +173,7 @@ func ReadXLSXFileSheets(path string, options ...LoadOption) (map[string]DataFram
 func (df DataFrame) WriteXLSXFile(path string, options ...WriteOption) error {
 	f, err := createFile(path)
 	if err != nil {
-		return fmt.Errorf("WriteXLSXFile: %v", err)
+		return fmt.Errorf("WriteXLSXFile: %w", err)
 	}
 	defer f.Close()
 	return df.WriteXLSX(f, options...)
@@ -263,7 +263,7 @@ func applyXLSXStyles(f *excelize.File, sheetName string, df DataFrame, cfg write
 	for name, width := range cfg.xlsxColumnWidths {
 		colIdx, ok := nameToIndex[name]
 		if !ok {
-			return fmt.Errorf("unknown XLSX column %q", name)
+			return withSentinel(fmt.Sprintf("unknown XLSX column %q", name), ErrColumnNotFound)
 		}
 		colName, err := excelize.ColumnNumberToName(colIdx)
 		if err != nil {
@@ -281,7 +281,7 @@ func applyXLSXStyles(f *excelize.File, sheetName string, df DataFrame, cfg write
 	for name, format := range cfg.xlsxNumberFormats {
 		colIdx, ok := nameToIndex[name]
 		if !ok {
-			return fmt.Errorf("unknown XLSX column %q", name)
+			return withSentinel(fmt.Sprintf("unknown XLSX column %q", name), ErrColumnNotFound)
 		}
 		if df.Nrow() == 0 {
 			continue

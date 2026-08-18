@@ -1,6 +1,7 @@
 package dataframe
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 
@@ -68,6 +69,11 @@ func TestSentinelErrors(t *testing.T) {
 			}
 			return idf.LocSlice("z", "x").Err
 		}(), ErrKeyNotFound},
+		{"Query unknown column", errDF.Query("missing > 1").Err, ErrColumnNotFound},
+		{"WriteXLSX unknown style column", func() error {
+			var buf bytes.Buffer
+			return errDF.WriteXLSX(&buf, WithXLSXColumnWidths(map[string]float64{"missing": 18}))
+		}(), ErrColumnNotFound},
 	}
 
 	for _, tc := range table {

@@ -69,7 +69,9 @@ These items must remain backward-compatible within v1.x.
 - [x] Add supported-Go-version CI, race tests, and benchmark regression
   reporting (GitHub Actions: gofmt/vet/test matrix on Go 1.24.9 and stable,
   race job, benchstat comparison against the cached master baseline).
-- [ ] Add documentation checks and a release checklist job to CI.
+- [x] Add documentation checks and a release checklist job to CI
+  (internal/doccheck anchor tests run in the suite; CI verifies the latest
+  tag has a dated CHANGELOG heading).
 - [x] Add fuzz/property tests for joins and indexes (Query parsing, CSV
   delimiter detection, Parquet round-trips, type conversion, join counts,
   and Index/MultiIndex lookups are all fuzzed in CI).

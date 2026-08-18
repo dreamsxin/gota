@@ -153,12 +153,12 @@ func (df DataFrame) Query(expr string) DataFrame {
 
 	tokens, err := tokenizeQueryExpression(expr)
 	if err != nil {
-		return DataFrame{Err: fmt.Errorf("Query: %v", err)}
+		return DataFrame{Err: fmt.Errorf("Query: %w", err)}
 	}
 	parser := queryMaskParser{df: df, tokens: tokens}
 	result, err := parser.parse()
 	if err != nil {
-		return DataFrame{Err: fmt.Errorf("Query: %v", err)}
+		return DataFrame{Err: fmt.Errorf("Query: %w", err)}
 	}
 	return df.Subset(result)
 }
@@ -427,7 +427,7 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 
 	col := df.Col(colPart)
 	if col.Err != nil {
-		return nil, fmt.Errorf("column %q not found", colPart)
+		return nil, withSentinel(fmt.Sprintf("column %q not found", colPart), ErrColumnNotFound)
 	}
 
 	n := df.nrows
