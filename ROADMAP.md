@@ -120,8 +120,12 @@ the v2 module reorganization if the kernel work proceeds.
 
 ## Later: Columnar Kernel RFC
 
-This is a design milestone, not a collection of independent features.
+Design document: [docs/rfc-columnar-kernel.md](docs/rfc-columnar-kernel.md)
+(draft, 2026-08-18). The measured v1 baseline it builds on: 16 B/element
+numeric columns, 5.2 ms + 8 MB alloc for a 1M-row Mean, 273 µs for a 100k-row
+Copy. This is a design milestone, not a collection of independent features.
 
+- [ ] RFC reviewed and accepted (open questions in §9 resolved).
 - [ ] Prototype contiguous typed buffers with a validity bitmap and batch
   kernels, behind the current Series API.
 - [ ] Measure memory use and representative operations against the v1.2.1
