@@ -9,7 +9,7 @@ API rather than pandas API parity. The API is still evolving, so review release
 notes when upgrading.
 
 **v2 released:** the `v2/` directory carries the columnar kernel module
-`github.com/dreamsxin/gota/v2` (tagged `v2/v2.0.0`) — see
+`github.com/dreamsxin/gota/v2` (tagged `v2.0.0`) — see
 **[v2/README.md](v2/README.md)** for the v2 API documentation, the
 performance report, and [v2/MIGRATION.md](v2/MIGRATION.md) for the upgrade
 guide; design: [v2/docs/rfc-columnar-kernel.md](v2/docs/rfc-columnar-kernel.md).

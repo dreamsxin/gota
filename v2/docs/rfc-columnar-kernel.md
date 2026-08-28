@@ -37,8 +37,10 @@ automatic threshold adjustment.
 Revised: 2026-08-28 (Milestone 4 landed, v2.0.0 tagged) - adapters split
 into the `v2/excel`, `v2/parquet`, and `v2/sql` submodules; the core
 module dropped excelize/parquet-go/sqlite; Int columns distinguish 0 from
-missing; CHANGELOG `## [2.0.0]` and MIGRATION.md published; tag
-`v2/v2.0.0` on the repository (Go major-version subdirectory layout).
+missing; CHANGELOG `## [2.0.0]` and MIGRATION.md published; plain tag
+`v2.0.0` resolves to the `v2/` subdirectory module (gax-go layout, v1.x
+coexists at the root under its v1.x tags), adapter modules tagged
+`v2/excel/v1.0.0`, `v2/parquet/v1.0.0`, `v2/sql/v1.0.0` (go-kit convention).
 Scope: Series storage layout, batch kernels, DType system, and the v2.0.0
 release path. This is a design document, not a feature list; every
 performance claim below is measured on the v1 implementation by the
@@ -170,8 +172,9 @@ Rules:
 
 Compatibility with v1 is not a constraint (§2). The kernel is developed in
 the repository's `v2/` major-version subdirectory under the module path
-`github.com/dreamsxin/gota/v2` and ships as v2.0.0 via a `v2/v2.0.0` tag;
-v1.x at the repository root receives fixes only until that tag. All breaking
+`github.com/dreamsxin/gota/v2` and ships as v2.0.0 via the plain `v2.0.0`
+tag, which resolves to this subdirectory module (the gax-go layout); v1.x
+coexists at the repository root, preserved by its v1.x tags. All breaking
 changes ship together in that one release and are listed in the CHANGELOG
 plus a migration guide:
 
@@ -204,7 +207,7 @@ directory; they are reviewable units, not independently shipped releases:
    are first needed.
 4. **Milestone 4 - release.** The `/v2` module path is already in place
    with the directory layout; split adapters into submodules, publish the
-   CHANGELOG entry and migration guide, tag `v2/v2.0.0`.
+   CHANGELOG entry and migration guide, tag `v2.0.0`.
 
 ## 8. Success criteria
 

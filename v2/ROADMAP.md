@@ -150,15 +150,15 @@ collection of independent features.
   (decision: no compatibility obligation - v2.0.0 ships as a clean break on
   the `/v2` module path; see RFC §7).
 
-## Next: v2.0.0 Release
+## v2.0.0 Release (released 2026-08-28)
 
 The columnar kernel ships as v2.0.0 under `github.com/dreamsxin/gota/v2`,
-developed in the repository's `v2/` directory per Go's major-version
-subdirectory layout (tags use the `v2/v2.0.0` form). Implementation follows
-the RFC milestone order (buffers, kernels, DType, release); v1.x at the
-repository root receives fixes only until the tag. Breaking changes ship
-together in v2.0.0 and are enumerated in the CHANGELOG and a migration
-guide.
+developed in the repository's `v2/` directory; the plain `v2.0.0` tag
+resolves to that subdirectory module (the gax-go layout), and the nested
+adapter modules use `v2/excel/v1.0.0`-style tags (the go-kit convention).
+v1.x coexists at the repository root, preserved by its `v1.2.1`–`v1.4.0`
+tags. Breaking changes ship together in v2.0.0 and are enumerated in the
+CHANGELOG and a migration guide.
 
 - [x] Milestone 1: column buffers behind the Series API, memory ~2x down,
   benchmarks improved against the §1 baseline. Landed in the `v2/`
@@ -182,7 +182,8 @@ guide.
   `v2/sql` submodules (core module dependency-light); Int columns
   distinguish 0 from missing (validity bitmaps, Milestone 1).
 - [x] Publish the CHANGELOG entry (`## [2.0.0]`), MIGRATION.md, and tag
-  `v2/v2.0.0` (2026-08-28).
+  `v2.0.0` plus the adapter tags `v2/excel/v1.0.0`, `v2/parquet/v1.0.0`,
+  `v2/sql/v1.0.0` (2026-08-28).
 
 ## Research, Not Committed
 
