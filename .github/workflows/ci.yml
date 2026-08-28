@@ -167,38 +167,33 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      # The most recent tag must have a dated CHANGELOG heading before a
-      # release is considered complete. Pre-1.1.0 patch lines were
-      # consolidated under the 1.0.0 entry and are not checked. v2 releases
-      # use v2/vX.Y.Z tags checked against v2/CHANGELOG.md.
-      - name: latest tag has CHANGELOG entry
+      # The most recent tag of each major line must have a dated CHANGELOG
+      # heading before a release is considered complete. v1.x tags are
+      # checked against the root CHANGELOG.md; v2+ tags belong to the module
+      # in the v2/ subdirectory (plain v2.x.y tags, gax-go layout) and are
+      # checked against v2/CHANGELOG.md.
+      - name: latest tags have CHANGELOG entries
         shell: bash
         run: |
-          latest=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
-          if [ -z "$latest" ]; then
-            echo "no version tags found" >&2
+          check_tag() {
+            tag="$1"; file="$2"; ver="${tag#v}"
+            echo "checking tag $tag against $file"
+            if ! grep -qE "^## \[$ver\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" "$file"; then
+              echo "$tag has no dated '## [$ver] - YYYY-MM-DD' heading in $file" >&2
+              exit 1
+            fi
+          }
+          latest_v1=$(git tag -l 'v*' | grep -E '^v1[0-9]*\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+          if [ -z "$latest_v1" ]; then
+            echo "no v1 version tags found" >&2
             exit 1
           fi
-          ver="${latest#v}"
-          echo "latest tag: $latest"
-          if ! grep -qE "^## \[$ver\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
-            echo "$latest has no dated '## [$ver] - YYYY-MM-DD' heading in CHANGELOG.md" >&2
-            exit 1
-          fi
-
-      - name: latest v2 tag has CHANGELOG entry
-        shell: bash
-        run: |
-          latest=$(git tag -l 'v2/*' | grep -E '^v2/v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
-          if [ -z "$latest" ]; then
-            echo "no v2 version tags yet; skipping"
-            exit 0
-          fi
-          ver="${latest#v2/v}"
-          echo "latest v2 tag: $latest"
-          if ! grep -qE "^## \[$ver\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" v2/CHANGELOG.md; then
-            echo "$latest has no dated '## [$ver] - YYYY-MM-DD' heading in v2/CHANGELOG.md" >&2
-            exit 1
+          check_tag "$latest_v1" CHANGELOG.md
+          latest_v2=$(git tag -l 'v*' | grep -E '^v[2-9][0-9]*\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+          if [ -n "$latest_v2" ]; then
+            check_tag "$latest_v2" v2/CHANGELOG.md
+          else
+            echo "no v2+ version tags yet; skipping"
           fi
 
   bench:
