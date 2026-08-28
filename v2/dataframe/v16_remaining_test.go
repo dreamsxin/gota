@@ -10,54 +10,6 @@ import (
 )
 
 // -----------------------------------------------------------------------
-// v1.5 — WriteSQL named placeholders
-// -----------------------------------------------------------------------
-
-func TestWriteSQL_DollarPlaceholder(t *testing.T) {
-	// SQLite doesn't support $1 style, but we can verify the generated SQL
-	// by checking that the placeholder builder produces the right strings.
-	ph := buildPlaceholder(SQLPlaceholderDollar, 1)
-	if ph != "$1" {
-		t.Errorf("dollar placeholder: got %q want $1", ph)
-	}
-	ph3 := buildPlaceholder(SQLPlaceholderDollar, 3)
-	if ph3 != "$3" {
-		t.Errorf("dollar placeholder 3: got %q want $3", ph3)
-	}
-}
-
-func TestWriteSQL_AtPlaceholder(t *testing.T) {
-	ph := buildPlaceholder(SQLPlaceholderAt, 2)
-	if ph != "@p2" {
-		t.Errorf("at placeholder: got %q want @p2", ph)
-	}
-}
-
-func TestWriteSQL_QuestionPlaceholder(t *testing.T) {
-	ph := buildPlaceholder(SQLPlaceholderQuestion, 99)
-	if ph != "?" {
-		t.Errorf("question placeholder: got %q want ?", ph)
-	}
-}
-
-func TestWriteSQL_DefaultPlaceholder_SQLite(t *testing.T) {
-	// Verify that the default (?) style still works end-to-end with SQLite.
-	db := openTestDB(t)
-	defer db.Close()
-	df := New(series.New([]string{"a", "b"}, series.String, "name"))
-	if err := df.WriteSQL(db, "ph_test", WithCreateTable(true)); err != nil {
-		t.Fatalf("WriteSQL default placeholder: %v", err)
-	}
-	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM ph_test").Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 2 {
-		t.Errorf("WriteSQL default placeholder count: got %d want 2", count)
-	}
-}
-
-// -----------------------------------------------------------------------
 // v1.5 — ScanCSV streaming
 // -----------------------------------------------------------------------
 

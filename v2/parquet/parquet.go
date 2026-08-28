@@ -1,20 +1,29 @@
-package dataframe
+// Package parquet reads and writes Apache Parquet files for gota/v2
+// DataFrames. It is the v2 adapter module for Parquet I/O: the heavy
+// parquet-go dependency lives here, not in the core dataframe module.
+package parquet
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"time"
 
 	parquet "github.com/parquet-go/parquet-go"
 
+	"github.com/dreamsxin/gota/v2/dataframe"
 	"github.com/dreamsxin/gota/v2/series"
 )
 
+func openFile(path string) (*os.File, error)   { return os.Open(path) }
+func createFile(path string) (*os.File, error) { return os.Create(path) }
+
 // WriteParquet writes the DataFrame to w in Apache Parquet format. Gota
-// missing values are encoded as nulls and rows are written in bounded batches.
-func (df DataFrame) WriteParquet(w io.Writer) error {
+// missing values are encoded as nulls and rows are written in bounded
+// batches.
+func WriteParquet(df dataframe.DataFrame, w io.Writer) error {
 	if df.Err != nil {
 		return df.Err
 	}
@@ -49,23 +58,23 @@ func (df DataFrame) WriteParquet(w io.Writer) error {
 	return nil
 }
 
-// WriteParquetFile is a convenience wrapper that creates/truncates a file and
-// calls WriteParquet.
-func (df DataFrame) WriteParquetFile(path string) error {
+// WriteParquetFile is a convenience wrapper that creates/truncates a file
+// and calls WriteParquet.
+func WriteParquetFile(df dataframe.DataFrame, path string) error {
 	f, err := createFile(path)
 	if err != nil {
 		return fmt.Errorf("WriteParquetFile: %v", err)
 	}
 	defer f.Close()
-	return df.WriteParquet(f)
+	return WriteParquet(df, f)
 }
 
 // ReadParquet reads an Apache Parquet file from r and builds a DataFrame.
 // The size parameter must be the total byte size of the Parquet input.
-func ReadParquet(r io.ReaderAt, size int64) DataFrame {
+func ReadParquet(r io.ReaderAt, size int64) dataframe.DataFrame {
 	file, err := parquet.OpenFile(r, size)
 	if err != nil {
-		return DataFrame{Err: fmt.Errorf("ReadParquet: %v", err)}
+		return dataframe.ErrorFrame(fmt.Errorf("ReadParquet: %v", err))
 	}
 
 	schema := file.Schema()
@@ -114,7 +123,7 @@ func ReadParquet(r io.ReaderAt, size int64) DataFrame {
 			break
 		}
 		if err != nil {
-			return DataFrame{Err: fmt.Errorf("ReadParquet: %v", err)}
+			return dataframe.ErrorFrame(fmt.Errorf("ReadParquet: %v", err))
 		}
 	}
 
@@ -125,30 +134,30 @@ func ReadParquet(r io.ReaderAt, size int64) DataFrame {
 		for i, name := range names {
 			cols[i] = series.New(nil, types[name], name).Empty()
 		}
-		return New(cols...)
+		return dataframe.New(cols...)
 	}
-	return LoadRecords(records, WithTypes(types))
+	return dataframe.LoadRecords(records, dataframe.WithTypes(types))
 }
 
 // ReadParquetFile is a convenience wrapper that opens a file path and calls
 // ReadParquet.
-func ReadParquetFile(path string) DataFrame {
+func ReadParquetFile(path string) dataframe.DataFrame {
 	f, err := openFile(path)
 	if err != nil {
-		return DataFrame{Err: fmt.Errorf("ReadParquetFile: %v", err)}
+		return dataframe.ErrorFrame(fmt.Errorf("ReadParquetFile: %v", err))
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		return DataFrame{Err: fmt.Errorf("ReadParquetFile: %v", err)}
+		return dataframe.ErrorFrame(fmt.Errorf("ReadParquetFile: %v", err))
 	}
 	return ReadParquet(f, info.Size())
 }
 
-func parquetSchemaFromDataFrame(df DataFrame) *parquet.Schema {
+func parquetSchemaFromDataFrame(df dataframe.DataFrame) *parquet.Schema {
 	fields := make(parquet.Group, df.Ncol())
-	for _, col := range df.columns {
+	for _, col := range df.Columns() {
 		fields[col.Name] = parquet.Optional(parquetNodeFromSeriesType(col.Type()))
 	}
 	return parquet.NewSchema("gota", fields)
@@ -169,11 +178,12 @@ func parquetNodeFromSeriesType(t series.Type) parquet.Node {
 	}
 }
 
-func parquetRowsFromDataFrame(df DataFrame, start, end int) ([]map[string]interface{}, error) {
+func parquetRowsFromDataFrame(df dataframe.DataFrame, start, end int) ([]map[string]interface{}, error) {
+	cols := df.Columns()
 	rows := make([]map[string]interface{}, end-start)
 	for row := start; row < end; row++ {
-		out := make(map[string]interface{}, df.Ncol())
-		for _, col := range df.columns {
+		out := make(map[string]interface{}, len(cols))
+		for _, col := range cols {
 			value, err := parquetValueAt(col, row)
 			if err != nil {
 				return nil, err

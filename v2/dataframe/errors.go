@@ -108,6 +108,13 @@ func withSentinel(msg string, sentinel error) error {
 	return &sentinelError{msg: msg, sentinel: sentinel}
 }
 
+// ErrorFrame returns a DataFrame carrying a sticky error. Adapter modules
+// (excel, parquet, sql) use it to construct error frames without reaching
+// into unexported state.
+func ErrorFrame(err error) DataFrame {
+	return DataFrame{Err: err}
+}
+
 type sentinelError struct {
 	msg      string
 	sentinel error

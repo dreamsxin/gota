@@ -571,29 +571,6 @@ func TestDataFrame_ErrorPropagation(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
-// WriteXLSXSheet
-// -----------------------------------------------------------------------
-
-func TestDataFrame_WriteXLSXSheet(t *testing.T) {
-	// WriteXLSXSheet requires *excelize.File — test via WriteXLSXMultiSheet
-	df1 := New(series.New([]string{"a", "b"}, series.String, "col"))
-	df2 := New(series.New([]int{1, 2, 3}, series.Int, "num"))
-	var buf bytes.Buffer
-	err := WriteXLSXMultiSheet(&buf, SheetData{"A", df1}, SheetData{"B", df2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Read back sheet B
-	got := ReadXLSX(bytes.NewReader(buf.Bytes()), WithSheet("B"))
-	if got.Err != nil {
-		t.Fatal(got.Err)
-	}
-	if got.Nrow() != 3 {
-		t.Errorf("WriteXLSXSheet B rows: got %d want 3", got.Nrow())
-	}
-}
-
-// -----------------------------------------------------------------------
 // ScanCSV — deep copy integrity (regression)
 // -----------------------------------------------------------------------
 

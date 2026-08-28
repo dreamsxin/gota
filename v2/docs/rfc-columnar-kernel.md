@@ -34,6 +34,11 @@ the data, letting kernels skip validity work on non-nullable columns.
 (single-chain contract - pool lock waiting is zero by construction);
 §9.3 landed as the 1.5 GiB ScanCSV byte budget with no exceptions and no
 automatic threshold adjustment.
+Revised: 2026-08-28 (Milestone 4 landed, v2.0.0 tagged) - adapters split
+into the `v2/excel`, `v2/parquet`, and `v2/sql` submodules; the core
+module dropped excelize/parquet-go/sqlite; Int columns distinguish 0 from
+missing; CHANGELOG `## [2.0.0]` and MIGRATION.md published; tag
+`v2/v2.0.0` on the repository (Go major-version subdirectory layout).
 Scope: Series storage layout, batch kernels, DType system, and the v2.0.0
 release path. This is a design document, not a feature list; every
 performance claim below is measured on the v1 implementation by the

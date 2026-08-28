@@ -1,30 +1,34 @@
-package dataframe
+// Package sql reads and writes SQL tables for gota/v2 DataFrames. It is the
+// v2 adapter module for database I/O: it builds on the standard
+// database/sql package, so any registered driver works.
+package sql
 
 import (
-	"database/sql"
+	dbsql "database/sql"
 	"fmt"
 	"strings"
 
+	"github.com/dreamsxin/gota/v2/dataframe"
 	"github.com/dreamsxin/gota/v2/series"
 )
 
-// FromSQL creates a DataFrame from a *sql.Rows result set.
+// FromSQL creates a DataFrame from a *dbsql.Rows result set.
 // The column names and types are inferred from the SQL metadata.
 // Supported SQL types are mapped to series types; everything else becomes String.
 //
 // Example:
 //
 //	rows, _ := db.Query("SELECT * FROM users")
-//	df := dataframe.FromSQL(rows)
-func FromSQL(rows *sql.Rows) DataFrame {
+//	df := sql.FromSQL(rows)
+func FromSQL(rows *dbsql.Rows) dataframe.DataFrame {
 	if rows == nil {
-		return DataFrame{Err: fmt.Errorf("FromSQL: rows is nil")}
+		return dataframe.ErrorFrame(fmt.Errorf("FromSQL: rows is nil"))
 	}
 	defer rows.Close()
 
 	colTypes, err := rows.ColumnTypes()
 	if err != nil {
-		return DataFrame{Err: fmt.Errorf("FromSQL: %v", err)}
+		return dataframe.ErrorFrame(fmt.Errorf("FromSQL: %v", err))
 	}
 
 	ncols := len(colTypes)
@@ -51,7 +55,7 @@ func FromSQL(rows *sql.Rows) DataFrame {
 
 	for rows.Next() {
 		if err := rows.Scan(scanPtrs...); err != nil {
-			return DataFrame{Err: fmt.Errorf("FromSQL: scan error: %v", err)}
+			return dataframe.ErrorFrame(fmt.Errorf("FromSQL: scan error: %v", err))
 		}
 		for i, val := range scanDest {
 			if val == nil {
@@ -62,7 +66,7 @@ func FromSQL(rows *sql.Rows) DataFrame {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return DataFrame{Err: fmt.Errorf("FromSQL: rows error: %v", err)}
+		return dataframe.ErrorFrame(fmt.Errorf("FromSQL: rows error: %v", err))
 	}
 
 	// Build series.
@@ -70,10 +74,10 @@ func FromSQL(rows *sql.Rows) DataFrame {
 	for i, name := range colNames {
 		cols[i] = series.New(rawCols[i], seriesTypes[i], name)
 		if cols[i].Err != nil {
-			return DataFrame{Err: fmt.Errorf("FromSQL: series error on column %q: %v", name, cols[i].Err)}
+			return dataframe.ErrorFrame(fmt.Errorf("FromSQL: series error on column %q: %v", name, cols[i].Err))
 		}
 	}
-	return New(cols...)
+	return dataframe.New(cols...)
 }
 
 // sqlTypeToSeriesType maps common SQL type names to series.Type.
@@ -106,7 +110,7 @@ const (
 	SQLPlaceholderAt SQLPlaceholderStyle = "@p"
 )
 
-// SQLInsertOption configures DataFrame.WriteSQL behaviour.
+// SQLInsertOption configures WriteSQL behaviour.
 type SQLInsertOption func(*sqlInsertOptions)
 
 type sqlInsertOptions struct {
@@ -138,7 +142,7 @@ func WithTruncateFirst(b bool) SQLInsertOption {
 //
 // Example:
 //
-//	err := df.WriteSQL(pgDB, "users", dataframe.WithPlaceholderStyle(dataframe.SQLPlaceholderDollar))
+//	err := sql.WriteSQL(df, pgDB, "users", sql.WithPlaceholderStyle(sql.SQLPlaceholderDollar))
 func WithPlaceholderStyle(style SQLPlaceholderStyle) SQLInsertOption {
 	return func(o *sqlInsertOptions) { o.placeholderStyle = style }
 }
@@ -173,17 +177,17 @@ func buildPlaceholder(style SQLPlaceholderStyle, pos int) string {
 }
 
 // WriteSQL inserts the DataFrame into a SQL table using db.
-// tableName is the destination table.  Column names are taken from the DataFrame.
+// tableName is the destination table. Column names are taken from the DataFrame.
 //
 // Example:
 //
 //	// SQLite / MySQL (default ? placeholders)
-//	err := df.WriteSQL(db, "my_table", dataframe.WithCreateTable(true))
+//	err := sql.WriteSQL(df, db, "my_table", sql.WithCreateTable(true))
 //
 //	// PostgreSQL ($1, $2, … placeholders)
-//	err := df.WriteSQL(pgDB, "my_table",
-//	    dataframe.WithPlaceholderStyle(dataframe.SQLPlaceholderDollar))
-func (df DataFrame) WriteSQL(db *sql.DB, tableName string, opts ...SQLInsertOption) error {
+//	err := sql.WriteSQL(df, pgDB, "my_table",
+//	    sql.WithPlaceholderStyle(sql.SQLPlaceholderDollar))
+func WriteSQL(df dataframe.DataFrame, db *dbsql.DB, tableName string, opts ...SQLInsertOption) error {
 	if df.Err != nil {
 		return df.Err
 	}
@@ -193,8 +197,8 @@ func (df DataFrame) WriteSQL(db *sql.DB, tableName string, opts ...SQLInsertOpti
 	}
 
 	colNames := df.Names()
-	ncols := df.ncols
-	nrows := df.nrows
+	ncols := df.Ncol()
+	nrows := df.Nrow()
 
 	// Optionally create table.
 	if cfg.createTable {
@@ -302,7 +306,7 @@ func buildSQLUpsertClause(colNames []string, cfg sqlInsertOptions) (string, erro
 	}
 	for _, name := range cfg.upsertConflict {
 		if _, ok := colSet[name]; !ok {
-			return "", withSentinel(fmt.Sprintf("WriteSQL: upsert conflict column %q not found", name), ErrColumnNotFound)
+			return "", fmt.Errorf("WriteSQL: upsert conflict column %q not found: %w", name, dataframe.ErrColumnNotFound)
 		}
 	}
 

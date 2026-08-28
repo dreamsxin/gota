@@ -144,51 +144,6 @@ func TestGroups_AggregationParallel(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
-// v1.5 — WithSheet
-// -----------------------------------------------------------------------
-
-func TestReadXLSX_WithSheet(t *testing.T) {
-	df1 := New(series.New([]string{"sheet1"}, series.String, "name"))
-	df2 := New(
-		series.New([]string{"sheet2"}, series.String, "name"),
-		series.New([]int{42}, series.Int, "value"),
-	)
-
-	var buf bytes.Buffer
-	if err := WriteXLSXMultiSheet(&buf, SheetData{"First", df1}, SheetData{"Second", df2}); err != nil {
-		t.Fatal(err)
-	}
-	got := ReadXLSX(bytes.NewReader(buf.Bytes()), WithSheet("Second"))
-	if got.Err != nil {
-		t.Fatalf("ReadXLSX WithSheet: %v", got.Err)
-	}
-	if got.Nrow() != 1 {
-		t.Errorf("ReadXLSX WithSheet rows: got %d want 1", got.Nrow())
-	}
-	if got.Ncol() != 2 {
-		t.Fatalf("ReadXLSX WithSheet cols: got %d want 2", got.Ncol())
-	}
-	if got.Col("name").Record(0) != "sheet2" {
-		t.Errorf("ReadXLSX WithSheet name: got %s want sheet2", got.Col("name").Record(0))
-	}
-	if got.Col("value").Record(0) != "42" {
-		t.Errorf("ReadXLSX WithSheet value: got %s want 42", got.Col("value").Record(0))
-	}
-}
-
-func TestReadXLSX_WithSheet_NotFound(t *testing.T) {
-	df := New(series.New([]string{"a"}, series.String, "x"))
-	var buf bytes.Buffer
-	if err := df.WriteXLSX(&buf); err != nil {
-		t.Fatal(err)
-	}
-	got := ReadXLSX(bytes.NewReader(buf.Bytes()), WithSheet("NoSuchSheet"))
-	if got.Err == nil {
-		t.Error("ReadXLSX WithSheet non-existent: expected error")
-	}
-}
-
-// -----------------------------------------------------------------------
 // v1.5 — JSON Lines (NDJSON)
 // -----------------------------------------------------------------------
 

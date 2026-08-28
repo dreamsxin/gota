@@ -1,7 +1,6 @@
 package dataframe
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/dreamsxin/gota/v2/series"
@@ -61,87 +60,6 @@ func TestDataFrame_AsCategorical_NonString(t *testing.T) {
 	_, err := df.AsCategorical("x")
 	if err == nil {
 		t.Error("AsCategorical non-string: expected error")
-	}
-}
-
-// -----------------------------------------------------------------------
-// WriteXLSXMultiSheet
-// -----------------------------------------------------------------------
-
-func TestWriteXLSXMultiSheet(t *testing.T) {
-	df1 := New(series.New([]string{"a", "b"}, series.String, "name"))
-	df2 := New(series.New([]int{1, 2, 3}, series.Int, "value"))
-
-	var buf bytes.Buffer
-	err := WriteXLSXMultiSheet(&buf,
-		SheetData{"Names", df1},
-		SheetData{"Values", df2},
-	)
-	if err != nil {
-		t.Fatalf("WriteXLSXMultiSheet: %v", err)
-	}
-	if buf.Len() == 0 {
-		t.Error("WriteXLSXMultiSheet: empty output")
-	}
-
-	// Read back the first sheet.
-	got1 := ReadXLSX(bytes.NewReader(buf.Bytes()), WithSheet("Names"))
-	if got1.Err != nil {
-		t.Fatalf("ReadXLSX Names: %v", got1.Err)
-	}
-	if got1.Nrow() != 2 {
-		t.Errorf("Names sheet rows: got %d want 2", got1.Nrow())
-	}
-	if got := got1.Records(); !recordsEqual(got, df1.Records()) {
-		t.Errorf("Names sheet records: got %v want %v", got, df1.Records())
-	}
-
-	// Read back the second sheet.
-	got2 := ReadXLSX(bytes.NewReader(buf.Bytes()), WithSheet("Values"))
-	if got2.Err != nil {
-		t.Fatalf("ReadXLSX Values: %v", got2.Err)
-	}
-	if got2.Nrow() != 3 {
-		t.Errorf("Values sheet rows: got %d want 3", got2.Nrow())
-	}
-	if got := got2.Records(); !recordsEqual(got, df2.Records()) {
-		t.Errorf("Values sheet records: got %v want %v", got, df2.Records())
-	}
-}
-
-func TestWriteXLSXMultiSheet_Empty(t *testing.T) {
-	var buf bytes.Buffer
-	err := WriteXLSXMultiSheet(&buf)
-	if err == nil {
-		t.Error("WriteXLSXMultiSheet empty: expected error")
-	}
-}
-
-func TestReadXLSXSheets(t *testing.T) {
-	df1 := New(series.New([]string{"a", "b"}, series.String, "name"))
-	df2 := New(series.New([]int{1, 2, 3}, series.Int, "value"))
-
-	var buf bytes.Buffer
-	err := WriteXLSXMultiSheet(&buf,
-		SheetData{"Names", df1},
-		SheetData{"Values", df2},
-	)
-	if err != nil {
-		t.Fatalf("WriteXLSXMultiSheet: %v", err)
-	}
-
-	sheets, err := ReadXLSXSheets(bytes.NewReader(buf.Bytes()))
-	if err != nil {
-		t.Fatalf("ReadXLSXSheets: %v", err)
-	}
-	if len(sheets) != 2 {
-		t.Fatalf("ReadXLSXSheets count: got %d want 2", len(sheets))
-	}
-	if got := sheets["Names"].Records(); !recordsEqual(got, df1.Records()) {
-		t.Errorf("Names sheet records: got %v want %v", got, df1.Records())
-	}
-	if got := sheets["Values"].Records(); !recordsEqual(got, df2.Records()) {
-		t.Errorf("Values sheet records: got %v want %v", got, df2.Records())
 	}
 }
 

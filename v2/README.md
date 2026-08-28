@@ -16,7 +16,9 @@ are removed, replaced by typed Series accessors (`Val`, `IsNA`, `Record`,
 `FloatAt`, `IntAt`, `BoolAt`, `TimeAt`) and column-wise apply. The DType
 system (physical types plus the Dictionary logical type, with
 `ExecutionContext` chain-local interning and the 1.5 GiB batch byte budget)
-landed with Milestone 3.
+landed with Milestone 3. Upgrading from v1.x: see
+[MIGRATION.md](MIGRATION.md); release history lives in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Table of Contents
 
@@ -91,21 +93,26 @@ landed with Milestone 3.
 go get github.com/dreamsxin/gota/v2
 ```
 
-Requires Go 1.24.9+. Key dependencies:
+Requires Go 1.24.9+. The I/O adapters are separate modules, so the core
+module stays dependency-light (pull in only what you use):
+
+| Module | Purpose |
+|---|---|
+| `github.com/dreamsxin/gota/v2/excel` | Excel I/O via [excelize](https://github.com/xuri/excelize) (no CGO) |
+| `github.com/dreamsxin/gota/v2/parquet` | Parquet I/O via [parquet-go](https://github.com/parquet-go/parquet-go) |
+| `github.com/dreamsxin/gota/v2/sql` | SQL I/O on top of `database/sql` (any driver) |
+
+Core module key dependencies:
 
 | Package | Purpose |
 |---|---|
 | `gonum.org/v1/gonum` | Numeric operations |
-| `github.com/xuri/excelize/v2` | Excel I/O (no CGO) |
-| `github.com/parquet-go/parquet-go` | Parquet I/O |
-| `modernc.org/sqlite` | SQL tests (pure Go SQLite) |
 | `github.com/olekukonko/tablewriter` | Table formatting |
 
-Note: the Excel, Parquet, and SQL adapters live in the core `dataframe`
-package, so their dependencies appear in `go.mod` even if you only use
-in-memory operations or CSV/JSON. Go only compiles what you import, but the
-module graph and downloads include all of them; splitting the adapters
-requires an API break and is deferred to v2 (see ROADMAP design decisions).
+Note: the Excel, Parquet, and SQL adapters live in their own modules
+(`v2/excel`, `v2/parquet`, `v2/sql`), so their dependencies only enter your
+build when you import those modules. CSV, JSON, NDJSON, and HTML I/O stay
+in the core `dataframe` package.
 
 ---
 
@@ -500,63 +507,75 @@ long := df.Melt(
 
 ### Excel I/O
 
-Uses [excelize](https://github.com/xuri/excelize) — no CGO required.
+Adapter module: `github.com/dreamsxin/gota/v2/excel` (uses
+[excelize](https://github.com/xuri/excelize) — no CGO required).
 
 ```go
+import "github.com/dreamsxin/gota/v2/excel"
+
 // Read
-df := dataframe.ReadXLSX(r)
-df := dataframe.ReadXLSXFile("data.xlsx",
-    dataframe.HasHeader(true),
-    dataframe.WithTypes(map[string]series.Type{"price": series.Float}),
+df := excel.ReadXLSX(r)
+df := excel.ReadXLSXFile("data.xlsx",
+    excel.WithLoadOptions(
+        dataframe.HasHeader(true),
+        dataframe.WithTypes(map[string]series.Type{"price": series.Float}),
+    ),
 )
-sheets, err := dataframe.ReadXLSXSheets(r) // map[string]DataFrame, one per sheet
+sheets, err := excel.ReadXLSXSheets(r) // map[string]DataFrame, one per sheet
 
 // Write
-err := df.WriteXLSX(w)
-err := df.WriteXLSXFile("output.xlsx")
-err := df.WriteXLSX(w,
-    dataframe.WithXLSXBoldHeader(true),
-    dataframe.WithXLSXColumnWidths(map[string]float64{"name": 18}),
-    dataframe.WithXLSXNumberFormats(map[string]string{"amount": "#,##0.00"}),
+err := excel.WriteXLSX(df, w)
+err := excel.WriteXLSXFile(df, "output.xlsx")
+err := excel.WriteXLSX(df, w,
+    excel.WithBoldHeader(true),
+    excel.WithColumnWidths(map[string]float64{"name": 18}),
+    excel.WithNumberFormats(map[string]string{"amount": "#,##0.00"}),
 )
 ```
 
 ### Parquet I/O
 
-Uses [parquet-go](https://github.com/parquet-go/parquet-go). Supports Gota
+Adapter module: `github.com/dreamsxin/gota/v2/parquet` (uses
+[parquet-go](https://github.com/parquet-go/parquet-go)). Supports Gota
 `String`, `Int`, `Float`, `Bool` and `Time` columns. Missing values are stored
 as Parquet nulls, and writes are processed in bounded row batches.
 
 ```go
-err := df.WriteParquet(w)
-err := df.WriteParquetFile("data.parquet")
+import "github.com/dreamsxin/gota/v2/parquet"
 
-df := dataframe.ReadParquet(readerAt, size)
-df := dataframe.ReadParquetFile("data.parquet")
+err := parquet.WriteParquet(df, w)
+err := parquet.WriteParquetFile(df, "data.parquet")
+
+df := parquet.ReadParquet(readerAt, size)
+df := parquet.ReadParquetFile("data.parquet")
 ```
 
 ### SQL I/O
+
+Adapter module: `github.com/dreamsxin/gota/v2/sql` (package name `sql` —
+alias it when you also import `database/sql`). Works with any registered
+driver.
 
 **FromSQL** — build a DataFrame from `*sql.Rows`:
 
 ```go
 rows, _ := db.Query("SELECT id, name, score FROM users WHERE active = 1")
-df := dataframe.FromSQL(rows)
+df := gotasql.FromSQL(rows)
 ```
 
 **WriteSQL** — insert into a database table:
 
 ```go
-err := df.WriteSQL(db, "users",
-    dataframe.WithCreateTable(true),   // CREATE TABLE IF NOT EXISTS
-    dataframe.WithTruncateFirst(true), // DELETE FROM before inserting
-    dataframe.WithBatchSize(200),      // rows per INSERT (default 500)
+err := gotasql.WriteSQL(df, db, "users",
+    gotasql.WithCreateTable(true),   // CREATE TABLE IF NOT EXISTS
+    gotasql.WithTruncateFirst(true), // DELETE FROM before inserting
+    gotasql.WithBatchSize(200),      // rows per INSERT (default 500)
 )
 
 // SQLite / PostgreSQL upsert on unique or primary-key columns.
-err := df.WriteSQL(db, "users",
-    dataframe.WithUpsert("id"),
-    dataframe.WithUpsertUpdateColumns("name", "score"),
+err := gotasql.WriteSQL(df, db, "users",
+    gotasql.WithUpsert("id"),
+    gotasql.WithUpsertUpdateColumns("name", "score"),
 )
 ```
 
@@ -1196,19 +1215,19 @@ err := df.WriteNDJSON(w)
 #### Excel — sheet selection
 
 ```go
-df := dataframe.ReadXLSXFile("data.xlsx", dataframe.WithSheet("Sheet2"))
+df := excel.ReadXLSXFile("data.xlsx", excel.WithSheet("Sheet2"))
 ```
 
 #### SQL — named placeholders
 
 ```go
 // PostgreSQL ($1, $2, …)
-err := df.WriteSQL(pgDB, "users",
-    dataframe.WithPlaceholderStyle(dataframe.SQLPlaceholderDollar))
+err := gotasql.WriteSQL(df, pgDB, "users",
+    gotasql.WithPlaceholderStyle(gotasql.SQLPlaceholderDollar))
 
 // SQL Server (@p1, @p2, …)
-err := df.WriteSQL(msDB, "users",
-    dataframe.WithPlaceholderStyle(dataframe.SQLPlaceholderAt))
+err := gotasql.WriteSQL(df, msDB, "users",
+    gotasql.WithPlaceholderStyle(gotasql.SQLPlaceholderAt))
 ```
 
 #### CSV streaming

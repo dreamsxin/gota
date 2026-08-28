@@ -178,9 +178,11 @@ guide.
   chain-local `ExecutionContext` intern pool feeds GroupBy keys (RFC §9.2,
   lock-free by contract); ScanCSV flushes on the 1.5 GiB byte budget
   (RFC §9.3).
-- [ ] Milestone 4: split Excel/Parquet/SQL adapters into submodules; Int
-  columns distinguish 0 from missing.
-- [ ] Publish the CHANGELOG entry, migration guide, and tag `v2/v2.0.0`.
+- [x] Milestone 4: adapters split into the `v2/excel`, `v2/parquet`, and
+  `v2/sql` submodules (core module dependency-light); Int columns
+  distinguish 0 from missing (validity bitmaps, Milestone 1).
+- [x] Publish the CHANGELOG entry (`## [2.0.0]`), MIGRATION.md, and tag
+  `v2/v2.0.0` (2026-08-28).
 
 ## Research, Not Committed
 

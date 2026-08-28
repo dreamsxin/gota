@@ -8,15 +8,17 @@ and data wrangling methods for Go, inspired by pandas. Gota provides an eager Go
 API rather than pandas API parity. The API is still evolving, so review release
 notes when upgrading.
 
-**v2 development:** the `v2/` directory carries the columnar kernel module
-`github.com/dreamsxin/gota/v2` — see **[v2/README.md](v2/README.md)** for
-the v2 API documentation and the performance report, and
-[v2/docs/rfc-columnar-kernel.md](v2/docs/rfc-columnar-kernel.md) for the
-design. It is developed per Go's major-version subdirectory layout and is a
-clean break from the API documented here: the `Element`/`Elem` surface and
-the `Rapply` family are removed in favor of typed Series accessors and
-column-wise apply. This README documents the v1.x API; until v2.0.0 is
-tagged, v1.x receives fixes only.
+**v2 released:** the `v2/` directory carries the columnar kernel module
+`github.com/dreamsxin/gota/v2` (tagged `v2/v2.0.0`) — see
+**[v2/README.md](v2/README.md)** for the v2 API documentation, the
+performance report, and [v2/MIGRATION.md](v2/MIGRATION.md) for the upgrade
+guide; design: [v2/docs/rfc-columnar-kernel.md](v2/docs/rfc-columnar-kernel.md).
+It is developed per Go's major-version subdirectory layout and is a clean
+break from the API documented here: the `Element`/`Elem` surface and the
+`Rapply` family are removed in favor of typed Series accessors and
+column-wise apply, and the Excel/Parquet/SQL adapters move to the
+`v2/excel`, `v2/parquet`, `v2/sql` submodules. This README documents the
+v1.x line, which receives fixes only.
 
 ## Table of Contents
 

@@ -5,6 +5,85 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 This document follows
 [markdownlint](https://github.com/markdownlint/markdownlint) formatting rules.
 
+## [2.0.0] - 2026-08-28
+
+The columnar kernel release (RFC: `docs/rfc-columnar-kernel.md`). This is a
+clean break from v1.x: module path, storage, and parts of the API change.
+See `MIGRATION.md` for the step-by-step upgrade guide.
+
+### Added
+
+- Columnar storage: every Series is a contiguous typed buffer (`[]int64`,
+  `[]float64`, `[]string`, `[]bool`, `[]time.Time`) plus a validity bitmap
+  (nil when all-valid). Memory drops ~2x for numerics (16 B → 8.125 B per
+  element) and `Copy` is a memcpy.
+- Typed per-row accessors: `Val(i)`, `IsNA(i)`, `Record(i)`, `FloatAt(i)`,
+  `IntAt(i)`, `Int64At(i)`, `BoolAt(i)`, `TimeAt(i)`, and `GatherRows`
+  (negative indexes become missing).
+- Batch kernels with selection masks: `Series.CompareMask` returns a `Mask`
+  combined word-wise (`AndInto`/`OrInto`); `DataFrame.Filter`,
+  `FilterAggregation`, and `Query` evaluate through masks.
+- Single-pass `Arrange`: permutations compose on row numbers and
+  materialize once behind the measured RFC §9.1 snapshot view.
+- Typed single-key hash joins (Int/Bool/String keys hash typed values;
+  composite keys keep the collision-safe string encoding) with batched
+  output assembly.
+- DType system (RFC §4): `series.DType` interface with physical singletons
+  (`DTInt64`, `DTFloat64`, `DTUtf8`, `DTBool`, `DTTime`) and the Dictionary
+  logical type (`NewDictionaryDType`, `DictionaryCategories`); `Series.DType()`
+  and `Schema.DTypes()` expose it; `Field.Nullable` now derives from the
+  data.
+- Dictionary-encoded columns: `Categorical.ToDictionarySeries()` yields a
+  dictionary-backed Series that reads like a String column; GroupBy
+  factorizes dictionary codes directly.
+- `series.ExecutionContext`: chain-local, lock-free string intern pool
+  (RFC §9.2) attached via `DataFrame.WithExecutionContext`; O(1) `Release`.
+- `dataframe.BatchByteBudget` (1.5 GiB, RFC §9.3): `ScanCSV` flushes on row
+  count or net bytes, whichever comes first.
+- UDF registration (RFC §9.4): `dataframe.BatchTransform` +
+  `DataFrame.ApplyBatch`, with `series.MapFloat64`/`series.MapInt64`
+  masked-loop kernels for scalar row logic.
+- Adapter submodules: `github.com/dreamsxin/gota/v2/excel`,
+  `github.com/dreamsxin/gota/v2/parquet`, `github.com/dreamsxin/gota/v2/sql`.
+  The core module no longer requires excelize, parquet-go, or sqlite.
+- New exports supporting adapters: `dataframe.ErrorFrame`,
+  `dataframe.DataFrame.Columns()`.
+
+### Changed (breaking)
+
+- Module path is `github.com/dreamsxin/gota/v2` (import paths gain `/v2`).
+- Int columns distinguish the value 0 from missing; NaN-as-sentinel tricks
+  (NaN floats, "NaN" strings standing in for missing, nan flags) are
+  replaced by validity bitmaps.
+- `Schema.Field.Nullable` reports observed nullability instead of always
+  true; `Schema.Equal` compares DTypes.
+- Adapter calls move to submodules and methods become functions, e.g.
+  `df.WriteXLSX(w)` → `excel.WriteXLSX(df, w)`, `df.WriteParquet(w)` →
+  `parquet.WriteParquet(df, w)`, `df.WriteSQL(db, t)` → `sql.WriteSQL(df,
+  db, t)`; `dataframe.ReadXLSX` → `excel.ReadXLSX`, etc.
+
+### Removed (breaking)
+
+- `Element`/`Elements` interfaces, `Series.Elem`, `Series.Map`, and the
+  `ElementValue` type (use the typed accessors above).
+- `DataFrame.Rapply`/`RapplyParallel` (use column-wise operations,
+  `ApplyBatch`, or `CapplyParallel`).
+- Excel-specific options from the core module (`WithSheet`,
+  `WithSheetName`, `WithXLSXBoldHeader`, `WithXLSXColumnWidths`,
+  `WithXLSXNumberFormats`, `SheetData`); equivalents live in `v2/excel`
+  (`excel.WithSheet`, `excel.WithSheetName`, `excel.WithBoldHeader`,
+  `excel.WithColumnWidths`, `excel.WithNumberFormats`, `excel.SheetData`).
+
+### Performance (same-session paired measurements, i5-12400F)
+
+| Workload | v1.x | v2 |
+|---|---|---|
+| `Mean` over 1M Float rows | 4.82 ms, 8.0 MB alloc | 0.24 ms, 0 allocs |
+| `Copy` of 100k Int rows | 513 µs, 1.6 MB | 71 µs, 0.8 MB |
+| `Filter` (two AND conditions, 100k rows) | 4.08 ms, 50 allocs | 1.10 ms, 26 allocs |
+| `InnerJoin` 20k×20k on an Int key | 11.1 ms, 240k allocs | 2.14 ms, 20k allocs |
+| `Arrange` 100k×20 columns, 3 keys | 117.8 ms | 86.9 ms |
+
 ## [1.4.0] - 2026-08-18
 
 ### Added

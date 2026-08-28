@@ -1,4 +1,4 @@
-package dataframe
+package excel_test
 
 import (
 	"bytes"
@@ -6,14 +6,20 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/dreamsxin/gota/v2/dataframe"
+	"github.com/dreamsxin/gota/v2/excel"
 	"github.com/dreamsxin/gota/v2/series"
 	"github.com/xuri/excelize/v2"
 )
 
+func recordsEqual(a, b [][]string) bool {
+	return reflect.DeepEqual(a, b)
+}
+
 // TestExcel_RoundTrip writes a DataFrame to an in-memory XLSX buffer and reads
 // it back, verifying that the values survive the round-trip.
 func TestExcel_RoundTrip(t *testing.T) {
-	orig := New(
+	orig := dataframe.New(
 		series.New([]string{"Alice", "Bob", "Carol"}, series.String, "Name"),
 		series.New([]int{30, 25, 35}, series.Int, "Age"),
 		series.New([]float64{1000.5, 2000.0, 1500.75}, series.Float, "Salary"),
@@ -21,13 +27,13 @@ func TestExcel_RoundTrip(t *testing.T) {
 
 	// Write to buffer.
 	var buf bytes.Buffer
-	if err := orig.WriteXLSX(&buf); err != nil {
+	if err := excel.WriteXLSX(orig, &buf); err != nil {
 		t.Fatalf("WriteXLSX: %v", err)
 	}
 
 	// Read back.
 	reader := bytes.NewReader(buf.Bytes())
-	got := ReadXLSX(reader)
+	got := excel.ReadXLSX(reader)
 	if got.Err != nil {
 		t.Fatalf("ReadXLSX: %v", got.Err)
 	}
@@ -53,11 +59,11 @@ func TestExcel_RoundTrip(t *testing.T) {
 
 // TestExcel_EmptyDataFrame tests that writing an empty-ish DataFrame does not panic.
 func TestExcel_EmptyDataFrame(t *testing.T) {
-	df := New(
+	df := dataframe.New(
 		series.New([]string{}, series.String, "X"),
 	)
 	var buf bytes.Buffer
-	if err := df.WriteXLSX(&buf); err != nil {
+	if err := excel.WriteXLSX(df, &buf); err != nil {
 		t.Fatalf("WriteXLSX empty: %v", err)
 	}
 	// Buffer should contain a valid XLSX (non-zero bytes).
@@ -66,17 +72,17 @@ func TestExcel_EmptyDataFrame(t *testing.T) {
 	}
 }
 
-// TestExcel_MultipleSheets_DefaultFirst checks that ReadXLSX reads the first sheet.
+// TestExcel_WriteReadHeaders checks that ReadXLSX reads the header row.
 func TestExcel_WriteReadHeaders(t *testing.T) {
-	df := New(
+	df := dataframe.New(
 		series.New([]string{"x", "y"}, series.String, "col1"),
 		series.New([]int{1, 2}, series.Int, "col2"),
 	)
 	var buf bytes.Buffer
-	if err := df.WriteXLSX(&buf); err != nil {
+	if err := excel.WriteXLSX(df, &buf); err != nil {
 		t.Fatalf("WriteXLSX: %v", err)
 	}
-	got := ReadXLSX(bytes.NewReader(buf.Bytes()))
+	got := excel.ReadXLSX(bytes.NewReader(buf.Bytes()))
 	if got.Err != nil {
 		t.Fatalf("ReadXLSX: %v", got.Err)
 	}
@@ -86,14 +92,14 @@ func TestExcel_WriteReadHeaders(t *testing.T) {
 }
 
 func TestWriteXLSX_WithSheetName(t *testing.T) {
-	df := New(series.New([]string{"a", "b"}, series.String, "name"))
+	df := dataframe.New(series.New([]string{"a", "b"}, series.String, "name"))
 
 	var buf bytes.Buffer
-	if err := df.WriteXLSX(&buf, WithSheetName("Data")); err != nil {
+	if err := excel.WriteXLSX(df, &buf, excel.WithSheetName("Data")); err != nil {
 		t.Fatalf("WriteXLSX WithSheetName: %v", err)
 	}
 
-	got := ReadXLSX(bytes.NewReader(buf.Bytes()), WithSheet("Data"))
+	got := excel.ReadXLSX(bytes.NewReader(buf.Bytes()), excel.WithSheet("Data"))
 	if got.Err != nil {
 		t.Fatalf("ReadXLSX named sheet: %v", got.Err)
 	}
@@ -103,16 +109,16 @@ func TestWriteXLSX_WithSheetName(t *testing.T) {
 }
 
 func TestWriteXLSX_StyleOptions(t *testing.T) {
-	df := New(
+	df := dataframe.New(
 		series.New([]string{"Alice", "Bob"}, series.String, "name"),
 		series.New([]float64{1234.5, 67.89}, series.Float, "amount"),
 	)
 
 	var buf bytes.Buffer
-	err := df.WriteXLSX(&buf,
-		WithXLSXBoldHeader(true),
-		WithXLSXColumnWidths(map[string]float64{"name": 18, "amount": 14}),
-		WithXLSXNumberFormats(map[string]string{"amount": "#,##0.00"}),
+	err := excel.WriteXLSX(df, &buf,
+		excel.WithBoldHeader(true),
+		excel.WithColumnWidths(map[string]float64{"name": 18, "amount": 14}),
+		excel.WithNumberFormats(map[string]string{"amount": "#,##0.00"}),
 	)
 	if err != nil {
 		t.Fatalf("WriteXLSX styles: %v", err)

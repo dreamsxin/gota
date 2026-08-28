@@ -1,21 +1,40 @@
-package dataframe
+package sql_test
 
 import (
-	"database/sql"
+	dbsql "database/sql"
 	"testing"
 
+	"github.com/dreamsxin/gota/v2/dataframe"
 	"github.com/dreamsxin/gota/v2/series"
+	gotasql "github.com/dreamsxin/gota/v2/sql"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, no CGO required
 )
 
 // openTestDB returns an in-memory SQLite database for testing.
-func openTestDB(t *testing.T) *sql.DB {
+func openTestDB(t *testing.T) *dbsql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := dbsql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("openTestDB: %v", err)
 	}
 	return db
+}
+
+func recordsEqual(got, want [][]string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if len(got[i]) != len(want[i]) {
+			return false
+		}
+		for j := range want[i] {
+			if got[i][j] != want[i][j] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // -----------------------------------------------------------------------
@@ -43,7 +62,7 @@ func TestFromSQL_Basic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	df := FromSQL(rows)
+	df := gotasql.FromSQL(rows)
 	if df.Err != nil {
 		t.Fatalf("FromSQL: %v", df.Err)
 	}
@@ -82,7 +101,7 @@ func TestFromSQL_NullValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	df := FromSQL(rows)
+	df := gotasql.FromSQL(rows)
 	if df.Err != nil {
 		t.Fatalf("FromSQL: %v", df.Err)
 	}
@@ -97,7 +116,7 @@ func TestFromSQL_NullValues(t *testing.T) {
 }
 
 func TestFromSQL_NilRows(t *testing.T) {
-	df := FromSQL(nil)
+	df := gotasql.FromSQL(nil)
 	if df.Err == nil {
 		t.Error("FromSQL(nil): expected error, got nil")
 	}
@@ -111,13 +130,13 @@ func TestWriteSQL_Basic(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 
-	df := New(
+	df := dataframe.New(
 		series.New([]string{"Alice", "Bob"}, series.String, "name"),
 		series.New([]int{30, 25}, series.Int, "age"),
 	)
 
 	// Create table and insert.
-	err := df.WriteSQL(db, "people", WithCreateTable(true))
+	err := gotasql.WriteSQL(df, db, "people", gotasql.WithCreateTable(true))
 	if err != nil {
 		t.Fatalf("WriteSQL: %v", err)
 	}
@@ -136,12 +155,12 @@ func TestWriteSQL_RoundTrip(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 
-	orig := New(
+	orig := dataframe.New(
 		series.New([]string{"x", "y", "z"}, series.String, "label"),
 		series.New([]float64{1.1, 2.2, 3.3}, series.Float, "value"),
 	)
 
-	if err := orig.WriteSQL(db, "data", WithCreateTable(true)); err != nil {
+	if err := gotasql.WriteSQL(orig, db, "data", gotasql.WithCreateTable(true)); err != nil {
 		t.Fatalf("WriteSQL: %v", err)
 	}
 
@@ -149,7 +168,7 @@ func TestWriteSQL_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	got := FromSQL(rows)
+	got := gotasql.FromSQL(rows)
 	if got.Err != nil {
 		t.Fatalf("FromSQL: %v", got.Err)
 	}
@@ -168,36 +187,19 @@ func TestWriteSQL_RoundTrip(t *testing.T) {
 	}
 }
 
-func recordsEqual(got, want [][]string) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range want {
-		if len(got[i]) != len(want[i]) {
-			return false
-		}
-		for j := range want[i] {
-			if got[i][j] != want[i][j] {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 func TestWriteSQL_TruncateFirst(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 
-	df := New(
+	df := dataframe.New(
 		series.New([]string{"a"}, series.String, "name"),
 	)
 	// First insert.
-	if err := df.WriteSQL(db, "items", WithCreateTable(true)); err != nil {
+	if err := gotasql.WriteSQL(df, db, "items", gotasql.WithCreateTable(true)); err != nil {
 		t.Fatalf("first WriteSQL: %v", err)
 	}
 	// Second insert with TruncateFirst → should replace, not append.
-	if err := df.WriteSQL(db, "items", WithTruncateFirst(true)); err != nil {
+	if err := gotasql.WriteSQL(df, db, "items", gotasql.WithTruncateFirst(true)); err != nil {
 		t.Fatalf("second WriteSQL: %v", err)
 	}
 	var count int
@@ -218,10 +220,10 @@ func TestWriteSQL_BatchSize(t *testing.T) {
 	for i := range names {
 		names[i] = "row"
 	}
-	df := New(
+	df := dataframe.New(
 		series.New(names, series.String, "name"),
 	)
-	if err := df.WriteSQL(db, "batch_test", WithCreateTable(true), WithBatchSize(3)); err != nil {
+	if err := gotasql.WriteSQL(df, db, "batch_test", gotasql.WithCreateTable(true), gotasql.WithBatchSize(3)); err != nil {
 		t.Fatalf("WriteSQL batch: %v", err)
 	}
 	var count int
@@ -246,21 +248,21 @@ func TestWriteSQL_UpsertSQLite(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	initial := New(
+	initial := dataframe.New(
 		series.New([]int{1, 2}, series.Int, "id"),
 		series.New([]string{"Alice", "Bob"}, series.String, "name"),
 		series.New([]float64{9.5, 8.0}, series.Float, "score"),
 	)
-	if err := initial.WriteSQL(db, "people"); err != nil {
+	if err := gotasql.WriteSQL(initial, db, "people"); err != nil {
 		t.Fatalf("initial WriteSQL: %v", err)
 	}
 
-	update := New(
+	update := dataframe.New(
 		series.New([]int{2, 3}, series.Int, "id"),
 		series.New([]string{"Bobby", "Carol"}, series.String, "name"),
 		series.New([]float64{8.8, 7.5}, series.Float, "score"),
 	)
-	if err := update.WriteSQL(db, "people", WithUpsert("id")); err != nil {
+	if err := gotasql.WriteSQL(update, db, "people", gotasql.WithUpsert("id")); err != nil {
 		t.Fatalf("upsert WriteSQL: %v", err)
 	}
 
@@ -268,7 +270,7 @@ func TestWriteSQL_UpsertSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	got := FromSQL(rows)
+	got := gotasql.FromSQL(rows)
 	if got.Err != nil {
 		t.Fatal(got.Err)
 	}
@@ -299,12 +301,12 @@ func TestWriteSQL_UpsertUpdateColumns(t *testing.T) {
 		t.Fatalf("insert: %v", err)
 	}
 
-	update := New(
+	update := dataframe.New(
 		series.New([]int{1}, series.Int, "id"),
 		series.New([]string{"Alicia"}, series.String, "name"),
 		series.New([]float64{10.0}, series.Float, "score"),
 	)
-	if err := update.WriteSQL(db, "people", WithUpsert("id"), WithUpsertUpdateColumns("score")); err != nil {
+	if err := gotasql.WriteSQL(update, db, "people", gotasql.WithUpsert("id"), gotasql.WithUpsertUpdateColumns("score")); err != nil {
 		t.Fatalf("upsert WriteSQL: %v", err)
 	}
 
@@ -322,9 +324,26 @@ func TestWriteSQL_UpsertMissingConflictColumn(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 
-	df := New(series.New([]int{1}, series.Int, "id"))
-	err := df.WriteSQL(db, "items", WithCreateTable(true), WithUpsert("missing"))
+	df := dataframe.New(series.New([]int{1}, series.Int, "id"))
+	err := gotasql.WriteSQL(df, db, "items", gotasql.WithCreateTable(true), gotasql.WithUpsert("missing"))
 	if err == nil {
 		t.Fatal("expected missing conflict column error")
+	}
+}
+
+func TestWriteSQL_DefaultPlaceholder_SQLite(t *testing.T) {
+	// Verify that the default (?) style still works end-to-end with SQLite.
+	db := openTestDB(t)
+	defer db.Close()
+	df := dataframe.New(series.New([]string{"a", "b"}, series.String, "name"))
+	if err := gotasql.WriteSQL(df, db, "ph_test", gotasql.WithCreateTable(true)); err != nil {
+		t.Fatalf("WriteSQL default placeholder: %v", err)
+	}
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM ph_test").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Errorf("WriteSQL default placeholder count: got %d want 2", count)
 	}
 }

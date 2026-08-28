@@ -1655,9 +1655,6 @@ type loadOptions struct {
 
 	// Defines which col idx are going to be skipped when load from slice.
 	skipColIdxs map[int]int
-
-	// sheet specifies the XLSX sheet name to read (used by ReadXLSX).
-	sheet string
 }
 
 // DefaultType sets the defaultType option for loadOptions.
@@ -2184,52 +2181,12 @@ type WriteOption func(*writeOptions)
 type writeOptions struct {
 	// Specifies whether the header is also written
 	writeHeader bool
-
-	// Specifies the XLSX sheet name when writing Excel files
-	sheetName string
-
-	// Specifies whether XLSX headers should be written in bold
-	xlsxBoldHeader bool
-
-	// Specifies XLSX column widths by DataFrame column name
-	xlsxColumnWidths map[string]float64
-
-	// Specifies XLSX custom number formats by DataFrame column name
-	xlsxNumberFormats map[string]string
 }
 
 // WriteHeader sets the writeHeader option for writeOptions.
 func WriteHeader(b bool) WriteOption {
 	return func(c *writeOptions) {
 		c.writeHeader = b
-	}
-}
-
-// WithSheetName sets the sheet name used by WriteXLSX and WriteXLSXFile.
-func WithSheetName(name string) WriteOption {
-	return func(c *writeOptions) {
-		c.sheetName = name
-	}
-}
-
-// WithXLSXBoldHeader writes the XLSX header row in bold.
-func WithXLSXBoldHeader(b bool) WriteOption {
-	return func(c *writeOptions) {
-		c.xlsxBoldHeader = b
-	}
-}
-
-// WithXLSXColumnWidths sets XLSX column widths by DataFrame column name.
-func WithXLSXColumnWidths(widths map[string]float64) WriteOption {
-	return func(c *writeOptions) {
-		c.xlsxColumnWidths = widths
-	}
-}
-
-// WithXLSXNumberFormats sets XLSX custom number formats by DataFrame column name.
-func WithXLSXNumberFormats(formats map[string]string) WriteOption {
-	return func(c *writeOptions) {
-		c.xlsxNumberFormats = formats
 	}
 }
 
@@ -2462,6 +2419,15 @@ func (df DataFrame) Col(colname string) series.Series {
 		return series.Series{Err: withSentinel("unknown column name", ErrColumnNotFound)}
 	}
 	return df.columns[idx].Copy()
+}
+
+// Columns returns a copy of the DataFrame's column slice, in order. Adapter
+// modules (excel, parquet, sql) use it to iterate columns without reaching
+// into unexported state.
+func (df DataFrame) Columns() []series.Series {
+	out := make([]series.Series, len(df.columns))
+	copy(out, df.columns)
+	return out
 }
 
 func (df DataFrame) FillNaN(colname string, value series.Series) DataFrame {
