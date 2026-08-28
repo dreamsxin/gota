@@ -121,16 +121,18 @@ the v2 module reorganization if the kernel work proceeds.
 ## Later: Columnar Kernel RFC
 
 Design document: [docs/rfc-columnar-kernel.md](docs/rfc-columnar-kernel.md)
-(accepted 2026-08-18; sort snapshot views, chain-local string interning,
-1.5 GiB chunking, and Rapply removal decided in its §9). The measured v1
-baseline it builds on: 16 B/element numeric columns, 5.2 ms + 8 MB alloc for
-a 1M-row Mean, 273 µs for a 100k-row Copy. This is a design milestone, not a
-collection of independent features.
+(accepted 2026-08-18, revised 2026-08-28; sort snapshot views, chain-local
+string interning, byte-budget batch chunking, and Rapply removal decided in
+its §9). The measured v1 baseline it builds on: 16 B/element numeric columns,
+5.2 ms + 8 MB alloc for a 1M-row Mean, 273 µs for a 100k-row Copy. This is a
+design milestone, not a collection of independent features.
 
 - [x] RFC reviewed and accepted (§9 decisions resolved: materialize + snapshot
-  view with mandatory measurements, chain-local intern pools with a 1024-entry
-  thread hot cache, 1.5 GiB byte-based chunking with a 1.9 GiB fixed-width
-  exception, Rapply deleted from the kernel path at v2).
+  view with mandatory measurements, chain-local intern pool only with no
+  global pool, 1.5 GiB byte-budget batch splitting with no exceptions,
+  automatic threshold adjustment, or disk spill, Rapply deleted from the
+  kernel path at v2; the Int-vs-NaN semantics change activates with the /v2
+  module bump, not earlier).
 - [ ] Prototype contiguous typed buffers with a validity bitmap and batch
   kernels, behind the current Series API.
 - [ ] Measure memory use and representative operations against the v1.2.1

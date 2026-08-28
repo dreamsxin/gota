@@ -2,6 +2,9 @@
 
 Status: accepted (open questions resolved 2026-08-18, see §9)
 Date: 2026-08-18
+Revised: 2026-08-28 - §9.2 thread-local hot cache dropped; §9.3 reduced to
+byte-budget batch splitting; §9.4 wording aligned with §5 rule 4; the
+Int-vs-NaN semantics change is bound to the /v2 module bump.
 Scope: Series storage layout, batch kernels, DType system, and the migration
 path. This is a design document, not a feature list; every performance claim
 below is measured on the v1 implementation unless marked as projected.
@@ -136,14 +139,16 @@ This is the highest-risk part; the plan is deliberately boring:
    `BatchTransform` registration lands here; `Rapply` grows the §9.4
    perf warning. Sticky errors and sentinel wrapping carry over
    unchanged.
-3. **Phase 3 - DType.** Logical types land; `Categorical` becomes a DType;
-   Schema exposes it. Int-vs-NaN semantics change here (introduced
-   deliberately, called out in the release notes). The chain-local
-   intern pool (§9.2) and 1.5 GiB chunking (§9.3) land with the
-   Dictionary DType, where they are first needed.
-4. **Phase 4 - v2 module.** Split adapters (Excel/Parquet/SQL) into
-   submodules per the ROADMAP decision; bump module path to `/v2`.
-   `Rapply` leaves the package here (§9.4).
+4. **Phase 3 - DType.** Logical types land; `Categorical` becomes a DType;
+   Schema exposes it. The chain-local intern pool (§9.2) and byte-budget
+   chunking (§9.3) land with the Dictionary DType, where they are first
+   needed. The Int-vs-NaN semantics change does **not** ship here: it is
+   gated on the `/v2` module bump (Phase 4 below) so the v1.x module path
+   keeps its current semantics.
+5. **Phase 4 - v2 module.** Split adapters (Excel/Parquet/SQL) into
+   submodules per the ROADMAP decision; bump module path to `/v2`. The
+   Int-vs-NaN semantics change activates with this bump, called out in the
+   release notes. `Rapply` leaves the package here (§9.4).
 
 Each phase is independently shippable and revertible. Phase 1-2 can ship
 inside v1.x as pure performance work if the API holds.
@@ -177,52 +182,52 @@ estimation and the future Arrow zero-copy exchange depend on.
 
 Acceptance: view dereference costs < 5% of total sort time (benchmarked).
 
-### 9.2 String interning: chain-local pools + thread-local hot cache; no global pool
+### 9.2 String interning: chain-local pool only; no global pool
 
 - **No process-global pool, ever.** Fine-grained locking across concurrent
   users would thrash cache locality and fragment memory; proposals to promote
   any pool to process scope are rejected outright.
-- **Chain-local pool (primary).** Gota is eager, so the query context maps to
-  one transformation chain: an `ExecutionContext` owns the dictionary pool,
+- **Chain-local pool.** Gota is eager, so the query context maps to one
+  transformation chain: an `ExecutionContext` owns the dictionary pool,
   interning Dictionary keys, constants, and GroupBy keys for the whole chain.
   It is released in O(1) with the context - no per-string teardown.
-- **Thread-local hot cache (secondary).** Worker goroutines keep a
-  read-only weak-reference map of at most 1024 hot constants that bypasses
-  the pool's atomic refcounting; entries evict beyond the cap.
 - **Hard rule:** no pointer reuse across chains.
+
+A per-goroutine hot cache was proposed and rejected: Go provides no
+goroutine-local storage, and goroutines migrate between OS threads, so such a
+cache would need synchronization anyway, negating its purpose. It may be
+revisited only if profiling shows pool contention is a measured cost.
 
 Acceptance: under `CapplyParallel`-style concurrency, pool lock waiting stays
 below 0.3% of CPU cycles.
 
-### 9.3 Chunking: flush at 1.5 GiB, never at 2 GiB
+### 9.3 Chunking: split batches at a byte budget
 
 Chunk boundaries are decided by cumulative column-buffer bytes, never by row
-count. A RecordBatch under construction flushes when it passes **1.5 GiB of
-net data**; the only exception is fixed-width numeric columns (Int64-class)
-in final aggregate output, which may extend to **1.9 GiB** before converting
-to an IPC streaming form.
+count: a batch under construction splits when it passes **1.5 GiB of net
+data**. The budget exists so no single allocation grows unbounded, and
+serialization metadata (dictionary blocks, compression headers) always lands
+on top of a known, capped base.
 
-The 500 MiB headroom exists because allocator success rates for large
-contiguous virtual ranges degrade near 2 GiB, and serialization metadata
-(dictionary blocks, compression headers) lands on top of net bytes. Every
-flush emits a `ChunkedEvent` metric; five consecutive 1.5 GiB flushes
-auto-lower the threshold to 1.2 GiB to stop thrashing.
+Chunking stays a memory technique for bounded allocations inside the
+single-process scope (§2): no row-count limits, no automatic threshold
+adjustment, no format conversion, and no disk spill in this RFC. Spilling
+for blocking operators (Sort, Join) under memory pressure is future work,
+gated on a measured need.
 
-Blocking operators (Sort, Join) whose single column would cross the
-threshold spill to disk rather than panic on a failed allocation. Spilling
-is a memory-pressure escape hatch inside the single-process scope, not a
-distributed execution feature.
-
-Acceptance: no single allocation above 1.6 GiB in large-frame workloads.
+Acceptance: no single column-buffer allocation above 1.5 GiB in large-frame
+workloads.
 
 ### 9.4 Rapply: removed from the kernel path, demoted to the compat layer
 
-Row-oriented apply cannot vectorize and would poison escape analysis for
-every kernel compiled near it; it is deleted from the kernel path.
+Row-oriented apply boxes every value through the per-row Series interface
+and forces scalar, branch-heavy loops that the compiler cannot vectorize; it
+cannot share the batch kernel code paths. It is deleted from the kernel path.
 
 - All UDFs register as `BatchTransform` (column batch in, column batch out).
 - Scalar row logic must be written as a `ScalarFunc`, which the kernel wraps
-  into a vectorized masked loop (AVX-512/NEON when available).
+  into a masked loop over typed buffers. SIMD acceleration follows §5 rule 4:
+  explicit SIMD is deferred until the plain-Go baseline is measured.
 - The v1-compatible `Rapply` survives only in the compat layer for
   diagnostics, prints `[PERF WARNING] Row-level fallback engaged`, and
   reports accumulated slow-path time after the call.
@@ -235,7 +240,7 @@ guard alongside the benchmark suite).
 | Decision | Action | Acceptance |
 |---|---|---|
 | Sort | materialize + snapshot view + mandatory measurements | view deref < 5% of sort time |
-| String pool | chain-local pool + 1024-entry hot cache, no global | lock wait < 0.3% CPU cycles |
-| Chunking | 1.5 GiB flush (1.9 GiB fixed-width exception) | no allocation > 1.6 GiB |
+| String pool | chain-local pool only, no global pool | lock wait < 0.3% CPU cycles |
+| Chunking | 1.5 GiB byte-budget batch split, no exceptions | no allocation > 1.5 GiB |
 | Rapply | kernel deletion; compat layer with warning | no row-wise frames in kernel stacks |
 
