@@ -3,6 +3,8 @@ Gota: DataFrames, Series and Data Wrangling for Go
 
 `github.com/dreamsxin/gota/v2` — Go 1.24.9+
 
+简体中文：[README_zh.md](README_zh.md)
+
 An embeddable, single-process, in-memory implementation of DataFrames, Series,
 and data wrangling methods for Go, inspired by pandas. Gota provides an eager Go
 API rather than pandas API parity. The API is still evolving, so review release
@@ -50,13 +52,15 @@ landed with Milestone 3. Upgrading from v1.x: see
   - [Index & MultiIndex](#index--multiindex)
 - [Chaining operations](#chaining-operations)
 - [Error handling](#error-handling)
+- [Save a DataFrame to file](#save-a-dataframe-to-file)
 - [Print to console](#print-to-console)
-  - [Interfacing with gonum](#interfacing-with-gonum)
-  - [Data Exploration](#data-exploration)
-  - [Missing Data Handling](#missing-data-handling)
-  - [Value Operations](#value-operations)
-  - [Pipe](#pipe)
+- [Interfacing with gonum](#interfacing-with-gonum)
+- [Data Exploration](#data-exploration)
+- [Missing Data Handling](#missing-data-handling)
+- [Value Operations](#value-operations)
+- [Pipe](#pipe)
 - [Series](#series)
+  - [Usage](#usage)
   - [FillNaN](#fillnan)
   - [FillNaN with limit](#fillnan-with-forward--backward-limit)
   - [Rolling Window](#rolling-window)
