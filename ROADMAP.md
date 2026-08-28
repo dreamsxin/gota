@@ -123,9 +123,11 @@ the v2 module reorganization if the kernel work proceeds.
 Design document: [docs/rfc-columnar-kernel.md](docs/rfc-columnar-kernel.md)
 (accepted 2026-08-18, revised 2026-08-28; sort snapshot views, chain-local
 string interning, byte-budget batch chunking, and Rapply removal decided in
-its §9). The measured v1 baseline it builds on: 16 B/element numeric columns,
-5.2 ms + 8 MB alloc for a 1M-row Mean, 273 µs for a 100k-row Copy. This is a
-design milestone, not a collection of independent features.
+its §9). The measured v1 baseline it builds on, anchored by the committed
+benchmarks in `series/benchmarks_test.go`: 16 B/element numeric columns,
+4.9 ms + 8 MB alloc for a 1M-row Mean, 252 µs for a 100k-row Copy, 4.4 ms
+for a 1M-element `Elem(i).Float()` walk. This is a design milestone, not a
+collection of independent features.
 
 - [x] RFC reviewed and accepted (§9 decisions resolved: materialize + snapshot
   view with mandatory measurements, chain-local intern pool only with no
@@ -140,7 +142,28 @@ design milestone, not a collection of independent features.
 - [ ] Design Decimal and ordered Enum as logical DTypes on the same kernel.
 - [ ] Add Arrow import/export only after buffer ownership and validity semantics
   can support a documented zero-copy path.
-- [ ] Decide migration and compatibility policy before replacing v1 storage.
+- [x] Decide migration and compatibility policy before replacing v1 storage
+  (decision: no compatibility obligation - v2.0.0 ships as a clean break on
+  the `/v2` module path; see RFC §7).
+
+## Next: v2.0.0 Release
+
+The columnar kernel ships as v2.0.0 under `github.com/dreamsxin/gota/v2`.
+Implementation follows the RFC milestone order (buffers, kernels, DType,
+release); v1.x receives fixes only until the tag. Breaking changes ship
+together in v2.0.0 and are enumerated in the CHANGELOG and a migration
+guide.
+
+- [ ] Milestone 1: column buffers behind the Series API, memory ~2x down,
+  no benchmark regression against the §1 baseline.
+- [ ] Milestone 2: batch kernels for aggregations, filters, sorting, joins,
+  with golden-output tests; `BatchTransform` registration.
+- [ ] Milestone 3: DType system; `Categorical` as the Dictionary DType;
+  chain-local intern pool and byte-budget chunking.
+- [ ] Milestone 4: bump module path to `/v2`; split Excel/Parquet/SQL
+  adapters into submodules; remove `Element`/`Elem` and `Rapply` family;
+  Int columns distinguish 0 from missing.
+- [ ] Publish the CHANGELOG entry, migration guide, and tag v2.0.0.
 
 ## Research, Not Committed
 
