@@ -1,6 +1,6 @@
 # RFC: v2 Columnar Kernel
 
-Status: draft for review
+Status: accepted (open questions resolved 2026-08-18, see §9)
 Date: 2026-08-18
 Scope: Series storage layout, batch kernels, DType system, and the migration
 path. This is a design document, not a feature list; every performance claim
@@ -132,13 +132,18 @@ This is the highest-risk part; the plan is deliberately boring:
    memory should drop ~2x. `Elem(i)` adapters preserve the Element API.
 3. **Phase 2 - kernels.** Port hot operations (aggregations, filters,
    sorting, joins) to batch kernels one by one, each with a v1
-   golden-output test. Sticky errors and sentinel wrapping carry over
+   golden-output test. Sorting follows §9.1 (materialize + snapshot view).
+   `BatchTransform` registration lands here; `Rapply` grows the §9.4
+   perf warning. Sticky errors and sentinel wrapping carry over
    unchanged.
 3. **Phase 3 - DType.** Logical types land; `Categorical` becomes a DType;
    Schema exposes it. Int-vs-NaN semantics change here (introduced
-   deliberately, called out in the release notes).
+   deliberately, called out in the release notes). The chain-local
+   intern pool (§9.2) and 1.5 GiB chunking (§9.3) land with the
+   Dictionary DType, where they are first needed.
 4. **Phase 4 - v2 module.** Split adapters (Excel/Parquet/SQL) into
    submodules per the ROADMAP decision; bump module path to `/v2`.
+   `Rapply` leaves the package here (§9.4).
 
 Each phase is independently shippable and revertible. Phase 1-2 can ship
 inside v1.x as pure performance work if the API holds.
@@ -152,13 +157,85 @@ inside v1.x as pure performance work if the API holds.
 - The v1.3+ suite keeps passing: fuzz targets, ownership contract, sentinel
   errors, doc checks.
 
-## 9. Open questions
+## 9. Decisions (resolved 2026-08-18)
 
-1. Should `Sort`/`Arrange` produce views (permutation arrays) or
-   materialized copies? Views save memory; permutation indirection costs on
-   every later gather. Proposal: views, measure, revisit.
-2. String interning for dictionary DType: per-column or per-DataFrame pool?
-3. Chunked columns for >2 GB frames: needed before or after Arrow IPC?
-4. Does `Rapply` survive? It is inherently row-oriented; a view-based
-   kernel world makes it the slow path by definition. Keep with a doc
-   warning, or deprecate at v2.
+The four open questions are decided. Where a ruling used database-engine
+terms, it is mapped to Gota's single-process eager scope; the intent is kept.
+
+### 9.1 Sort: materialize internally, expose a read-only snapshot view
+
+`Arrange`/`Sort` materializes the sorted output buffers once, then returns a
+read-only snapshot view - an index of `(buffer, rowOffset)` over the
+materialized data, not a lazy permutation. Sorting is a global reorder whose
+intermediate state must be frozen before downstream operators see it; a lazy
+view would hand out pointers into unstable memory.
+
+Views must carry measurement metadata: `num_rows`, `total_byte_size`, and
+`spill_ratio` (0 while all in-memory). A sort view without measurements is a
+constructor error, not a warning: exact post-sort cardinality is what memory
+estimation and the future Arrow zero-copy exchange depend on.
+
+Acceptance: view dereference costs < 5% of total sort time (benchmarked).
+
+### 9.2 String interning: chain-local pools + thread-local hot cache; no global pool
+
+- **No process-global pool, ever.** Fine-grained locking across concurrent
+  users would thrash cache locality and fragment memory; proposals to promote
+  any pool to process scope are rejected outright.
+- **Chain-local pool (primary).** Gota is eager, so the query context maps to
+  one transformation chain: an `ExecutionContext` owns the dictionary pool,
+  interning Dictionary keys, constants, and GroupBy keys for the whole chain.
+  It is released in O(1) with the context - no per-string teardown.
+- **Thread-local hot cache (secondary).** Worker goroutines keep a
+  read-only weak-reference map of at most 1024 hot constants that bypasses
+  the pool's atomic refcounting; entries evict beyond the cap.
+- **Hard rule:** no pointer reuse across chains.
+
+Acceptance: under `CapplyParallel`-style concurrency, pool lock waiting stays
+below 0.3% of CPU cycles.
+
+### 9.3 Chunking: flush at 1.5 GiB, never at 2 GiB
+
+Chunk boundaries are decided by cumulative column-buffer bytes, never by row
+count. A RecordBatch under construction flushes when it passes **1.5 GiB of
+net data**; the only exception is fixed-width numeric columns (Int64-class)
+in final aggregate output, which may extend to **1.9 GiB** before converting
+to an IPC streaming form.
+
+The 500 MiB headroom exists because allocator success rates for large
+contiguous virtual ranges degrade near 2 GiB, and serialization metadata
+(dictionary blocks, compression headers) lands on top of net bytes. Every
+flush emits a `ChunkedEvent` metric; five consecutive 1.5 GiB flushes
+auto-lower the threshold to 1.2 GiB to stop thrashing.
+
+Blocking operators (Sort, Join) whose single column would cross the
+threshold spill to disk rather than panic on a failed allocation. Spilling
+is a memory-pressure escape hatch inside the single-process scope, not a
+distributed execution feature.
+
+Acceptance: no single allocation above 1.6 GiB in large-frame workloads.
+
+### 9.4 Rapply: removed from the kernel path, demoted to the compat layer
+
+Row-oriented apply cannot vectorize and would poison escape analysis for
+every kernel compiled near it; it is deleted from the kernel path.
+
+- All UDFs register as `BatchTransform` (column batch in, column batch out).
+- Scalar row logic must be written as a `ScalarFunc`, which the kernel wraps
+  into a vectorized masked loop (AVX-512/NEON when available).
+- The v1-compatible `Rapply` survives only in the compat layer for
+  diagnostics, prints `[PERF WARNING] Row-level fallback engaged`, and
+  reports accumulated slow-path time after the call.
+- v1.x keeps `Rapply` with a doc warning; the symbol leaves the package at
+  v2.0.0 and callers migrate to `BatchTransform`.
+
+Acceptance: no kernel-path stack contains the row-wise implementation (CI
+guard alongside the benchmark suite).
+
+| Decision | Action | Acceptance |
+|---|---|---|
+| Sort | materialize + snapshot view + mandatory measurements | view deref < 5% of sort time |
+| String pool | chain-local pool + 1024-entry hot cache, no global | lock wait < 0.3% CPU cycles |
+| Chunking | 1.5 GiB flush (1.9 GiB fixed-width exception) | no allocation > 1.6 GiB |
+| Rapply | kernel deletion; compat layer with warning | no row-wise frames in kernel stacks |
+
