@@ -160,7 +160,7 @@ func (df DataFrame) Query(expr string) DataFrame {
 	if err != nil {
 		return DataFrame{Err: fmt.Errorf("Query: %w", err)}
 	}
-	return df.Subset(result)
+	return df.Subset(result.Rows())
 }
 
 type queryTokenKind uint8
@@ -262,52 +262,52 @@ type queryMaskParser struct {
 	pos    int
 }
 
-func (p *queryMaskParser) parse() ([]bool, error) {
+func (p *queryMaskParser) parse() (series.Mask, error) {
 	mask, err := p.parseOr()
 	if err != nil {
-		return nil, err
+		return series.Mask{}, err
 	}
 	if p.pos != len(p.tokens) {
-		return nil, fmt.Errorf("unexpected token %q", p.tokens[p.pos].text)
+		return series.Mask{}, fmt.Errorf("unexpected token %q", p.tokens[p.pos].text)
 	}
 	return mask, nil
 }
 
-func (p *queryMaskParser) parseOr() ([]bool, error) {
+func (p *queryMaskParser) parseOr() (series.Mask, error) {
 	left, err := p.parseAnd()
 	if err != nil {
-		return nil, err
+		return series.Mask{}, err
 	}
 	for p.pos < len(p.tokens) && p.tokens[p.pos].kind == queryTokenOr {
 		p.pos++
 		right, err := p.parseAnd()
 		if err != nil {
-			return nil, err
+			return series.Mask{}, err
 		}
-		combineQueryMasks(left, right, false)
+		left.OrInto(right)
 	}
 	return left, nil
 }
 
-func (p *queryMaskParser) parseAnd() ([]bool, error) {
+func (p *queryMaskParser) parseAnd() (series.Mask, error) {
 	left, err := p.parsePrimary()
 	if err != nil {
-		return nil, err
+		return series.Mask{}, err
 	}
 	for p.pos < len(p.tokens) && p.tokens[p.pos].kind == queryTokenAnd {
 		p.pos++
 		right, err := p.parsePrimary()
 		if err != nil {
-			return nil, err
+			return series.Mask{}, err
 		}
-		combineQueryMasks(left, right, true)
+		left.AndInto(right)
 	}
 	return left, nil
 }
 
-func (p *queryMaskParser) parsePrimary() ([]bool, error) {
+func (p *queryMaskParser) parsePrimary() (series.Mask, error) {
 	if p.pos >= len(p.tokens) {
-		return nil, fmt.Errorf("incomplete expression")
+		return series.Mask{}, fmt.Errorf("incomplete expression")
 	}
 	token := p.tokens[p.pos]
 	switch token.kind {
@@ -318,25 +318,15 @@ func (p *queryMaskParser) parsePrimary() ([]bool, error) {
 		p.pos++
 		mask, err := p.parseOr()
 		if err != nil {
-			return nil, err
+			return series.Mask{}, err
 		}
 		if p.pos >= len(p.tokens) || p.tokens[p.pos].kind != queryTokenRightParen {
-			return nil, fmt.Errorf("missing closing parenthesis")
+			return series.Mask{}, fmt.Errorf("missing closing parenthesis")
 		}
 		p.pos++
 		return mask, nil
 	default:
-		return nil, fmt.Errorf("unexpected token %q", token.text)
-	}
-}
-
-func combineQueryMasks(left, right []bool, and bool) {
-	for i := range left {
-		if and {
-			left[i] = left[i] && right[i]
-		} else {
-			left[i] = left[i] || right[i]
-		}
+		return series.Mask{}, fmt.Errorf("unexpected token %q", token.text)
 	}
 }
 
@@ -355,8 +345,9 @@ func indexASCIIFold(s, sub string) int {
 	return -1
 }
 
-// evalQueryClause evaluates a single "col op value" clause.
-func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
+// evalQueryClause evaluates a single "col op value" clause into a
+// selection mask.
+func (df DataFrame) evalQueryClause(cond string) (series.Mask, error) {
 	cond = strings.TrimSpace(cond)
 
 	// Support quoted column names: `"col name" > 5` or `'col name' == foo`
@@ -419,25 +410,25 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 	}
 
 	if op == "" {
-		return nil, fmt.Errorf("unrecognised expression: %q", cond)
+		return series.Mask{}, fmt.Errorf("unrecognised expression: %q", cond)
 	}
 	if colPart == "" {
-		return nil, fmt.Errorf("missing column name in expression: %q", cond)
+		return series.Mask{}, fmt.Errorf("missing column name in expression: %q", cond)
 	}
 
 	col := df.Col(colPart)
 	if col.Err != nil {
-		return nil, withSentinel(fmt.Sprintf("column %q not found", colPart), ErrColumnNotFound)
+		return series.Mask{}, withSentinel(fmt.Sprintf("column %q not found", colPart), ErrColumnNotFound)
 	}
 
 	n := df.nrows
-	result := make([]bool, n)
+	result := series.NewMask(n)
 
 	switch strings.ToLower(op) {
 	case "in", "not in":
 		vals, err := parseQueryList(valPart)
 		if err != nil {
-			return nil, err
+			return series.Mask{}, err
 		}
 		lookup := make(map[string]struct{}, len(vals))
 		for _, v := range vals {
@@ -451,12 +442,14 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 		}
 		for i, s := range strs {
 			_, found := lookup[s]
-			result[i] = found == isIn
+			if found == isIn {
+				result.Select(i)
+			}
 		}
 	default:
 		comparisonValue, quoted, err := parseQueryValue(valPart)
 		if err != nil {
-			return nil, err
+			return series.Mask{}, err
 		}
 		// Numeric comparison if possible, else string.
 		numVal, numErr := strconv.ParseFloat(comparisonValue, 64)
@@ -468,46 +461,68 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 			floats := col.Float()
 			for i := 0; i < n; i++ {
 				if col.IsNA(i) {
-					result[i] = false
 					continue
 				}
 				ev := floats[i]
 				switch op {
 				case "==":
-					result[i] = ev == numVal
+					if ev == numVal {
+						result.Select(i)
+					}
 				case "!=":
-					result[i] = ev != numVal
+					if ev != numVal {
+						result.Select(i)
+					}
 				case ">":
-					result[i] = ev > numVal
+					if ev > numVal {
+						result.Select(i)
+					}
 				case ">=":
-					result[i] = ev >= numVal
+					if ev >= numVal {
+						result.Select(i)
+					}
 				case "<":
-					result[i] = ev < numVal
+					if ev < numVal {
+						result.Select(i)
+					}
 				case "<=":
-					result[i] = ev <= numVal
+					if ev <= numVal {
+						result.Select(i)
+					}
 				}
 			}
 		} else {
 			strs := col.Records() // single allocation, no per-row fmt.Sprintf
 			for i := 0; i < n; i++ {
 				if col.IsNA(i) {
-					result[i] = false
 					continue
 				}
 				es := strs[i]
 				switch op {
 				case "==":
-					result[i] = es == comparisonValue
+					if es == comparisonValue {
+						result.Select(i)
+					}
 				case "!=":
-					result[i] = es != comparisonValue
+					if es != comparisonValue {
+						result.Select(i)
+					}
 				case ">":
-					result[i] = es > comparisonValue
+					if es > comparisonValue {
+						result.Select(i)
+					}
 				case ">=":
-					result[i] = es >= comparisonValue
+					if es >= comparisonValue {
+						result.Select(i)
+					}
 				case "<":
-					result[i] = es < comparisonValue
+					if es < comparisonValue {
+						result.Select(i)
+					}
 				case "<=":
-					result[i] = es <= comparisonValue
+					if es <= comparisonValue {
+						result.Select(i)
+					}
 				}
 			}
 		}

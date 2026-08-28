@@ -464,194 +464,21 @@ func (s Series) FillNaNForwardLimit(limit int) Series { return s.fillNaCopy(true
 func (s Series) FillNaNBackwardLimit(limit int) Series { return s.fillNaCopy(false, limit) }
 
 // Compare compares the values of a Series with other elements. To do so, the
-// elements with are to be compared are first transformed to a Series of the same
-// type as the caller.
+// elements which are to be compared are first transformed to a Series of the
+// same type as the caller. The evaluation runs on the typed comparison
+// kernels producing a selection mask (kernel.go); the Bool Series result
+// keeps the historical public signature.
 func (s Series) Compare(comparator Comparator, comparando interface{}) Series {
 	if err := s.Err; err != nil {
 		return s
 	}
-
-	// CompFunc comparator comparison
-	if comparator == CompFunc {
-		f, ok := comparando.(compFunc)
-		if !ok {
-			ret := s.Empty()
-			ret.Err = fmt.Errorf("comparando is not a comparison function of type func(s Series, i int) bool")
-			return ret
-		}
-		bools := make([]bool, s.Len())
-		for i := 0; i < s.Len(); i++ {
-			bools[i] = f(s, i)
-		}
-		return Bools(bools)
-	}
-
-	comp := New(comparando, s.t, "")
-
-	// In/Out membership comparison
-	if comparator == In || comparator == Out {
-		bools := make([]bool, s.Len())
-		for i := 0; i < s.Len(); i++ {
-			found := false
-			for j := 0; j < comp.Len(); j++ {
-				if valuesEqual(s, i, comp, j) {
-					found = true
-					break
-				}
-			}
-			if comparator == In {
-				bools[i] = found
-			} else {
-				bools[i] = !found
-			}
-		}
-		return Bools(bools)
-	}
-
-	if comparator != Eq && comparator != Neq && comparator != Greater &&
-		comparator != GreaterEq && comparator != Less && comparator != LessEq {
+	mask, err := s.CompareMask(comparator, comparando)
+	if err != nil {
 		ret := s.Empty()
-		ret.Err = fmt.Errorf("unknown comparator: %v", comparator)
+		ret.Err = err
 		return ret
 	}
-
-	bools := make([]bool, s.Len())
-
-	// Single element comparison
-	if comp.Len() == 1 {
-		for i := 0; i < s.Len(); i++ {
-			bools[i] = compareRows(s, i, comp, 0, comparator)
-		}
-		return Bools(bools)
-	}
-
-	// Multiple element comparison
-	if s.Len() != comp.Len() {
-		ret := s.Empty()
-		ret.Err = fmt.Errorf("can't compare: length mismatch")
-		return ret
-	}
-	for i := 0; i < s.Len(); i++ {
-		bools[i] = compareRows(s, i, comp, i, comparator)
-	}
-	return Bools(bools)
-}
-
-// valuesEqual reports whether a[ai] and b[bi] are equal; missing values are
-// never equal. Both Series must hold the same type.
-func valuesEqual(a Series, ai int, b Series, bi int) bool {
-	if a.IsNA(ai) || b.IsNA(bi) {
-		return false
-	}
-	switch a.t {
-	case Int:
-		return a.elements.(intElements).data[ai] == b.elements.(intElements).data[bi]
-	case Float:
-		return a.elements.(floatElements).data[ai] == b.elements.(floatElements).data[bi]
-	case String:
-		return a.elements.(stringElements).data[ai] == b.elements.(stringElements).data[bi]
-	case Bool:
-		return a.elements.(boolElements).data[ai] == b.elements.(boolElements).data[bi]
-	case Time:
-		return a.elements.(timeElements).data[ai].Equal(b.elements.(timeElements).data[bi])
-	}
-	return false
-}
-
-// compareRows applies comparator to a[ai] vs b[bi] on same-type Series. Any
-// missing operand makes every comparison false, matching v1 semantics.
-func compareRows(a Series, ai int, b Series, bi int, comparator Comparator) bool {
-	if a.IsNA(ai) || b.IsNA(bi) {
-		return false
-	}
-	switch a.t {
-	case Int:
-		x := a.elements.(intElements).data[ai]
-		y := b.elements.(intElements).data[bi]
-		switch comparator {
-		case Eq:
-			return x == y
-		case Neq:
-			return x != y
-		case Greater:
-			return x > y
-		case GreaterEq:
-			return x >= y
-		case Less:
-			return x < y
-		case LessEq:
-			return x <= y
-		}
-	case Float:
-		x := a.elements.(floatElements).data[ai]
-		y := b.elements.(floatElements).data[bi]
-		switch comparator {
-		case Eq:
-			return x == y
-		case Neq:
-			return x != y
-		case Greater:
-			return x > y
-		case GreaterEq:
-			return x >= y
-		case Less:
-			return x < y
-		case LessEq:
-			return x <= y
-		}
-	case String:
-		x := a.elements.(stringElements).data[ai]
-		y := b.elements.(stringElements).data[bi]
-		switch comparator {
-		case Eq:
-			return x == y
-		case Neq:
-			return x != y
-		case Greater:
-			return x > y
-		case GreaterEq:
-			return x >= y
-		case Less:
-			return x < y
-		case LessEq:
-			return x <= y
-		}
-	case Bool:
-		x := a.elements.(boolElements).data[ai]
-		y := b.elements.(boolElements).data[bi]
-		switch comparator {
-		case Eq:
-			return x == y
-		case Neq:
-			return x != y
-		case Greater:
-			return x && !y
-		case GreaterEq:
-			return x || !y
-		case Less:
-			return !x && y
-		case LessEq:
-			return !x || y
-		}
-	case Time:
-		x := a.elements.(timeElements).data[ai]
-		y := b.elements.(timeElements).data[bi]
-		switch comparator {
-		case Eq:
-			return x.Equal(y)
-		case Neq:
-			return !x.Equal(y)
-		case Greater:
-			return x.After(y)
-		case GreaterEq:
-			return x.After(y) || x.Equal(y)
-		case Less:
-			return x.Before(y)
-		case LessEq:
-			return x.Before(y) || x.Equal(y)
-		}
-	}
-	return false
+	return Series{t: Bool, elements: mask.m.toBoolColumn()}
 }
 
 // Copy will return a copy of the Series.

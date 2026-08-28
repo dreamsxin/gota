@@ -1391,7 +1391,7 @@ func (df DataFrame) FilterAggregation(agg Aggregation, filters ...F) DataFrame {
 		return DataFrame{Err: fmt.Errorf("filter: unknown aggregation: %v", agg)}
 	}
 
-	compResults := make([]series.Series, len(filters))
+	compMasks := make([]series.Mask, len(filters))
 	for i, f := range filters {
 		var idx int
 		if f.Colname == "" {
@@ -1402,36 +1402,28 @@ func (df DataFrame) FilterAggregation(agg Aggregation, filters ...F) DataFrame {
 				return DataFrame{Err: fmt.Errorf("filter: can't find column name")}
 			}
 		}
-		res := df.columns[idx].Compare(f.Comparator, f.Comparando)
-		if err := res.Err; err != nil {
-			return DataFrame{Err: fmt.Errorf("filter: %v", err)}
-		}
-		compResults[i] = res
-	}
-
-	if len(compResults) == 0 {
-		return df.Copy()
-	}
-
-	res, err := compResults[0].Bool()
-	if err != nil {
-		return DataFrame{Err: fmt.Errorf("filter: %v", err)}
-	}
-	for i := 1; i < len(compResults); i++ {
-		nextRes, err := compResults[i].Bool()
+		mask, err := df.columns[idx].CompareMask(f.Comparator, f.Comparando)
 		if err != nil {
 			return DataFrame{Err: fmt.Errorf("filter: %v", err)}
 		}
-		for j := 0; j < len(res); j++ {
-			switch agg {
-			case Or:
-				res[j] = res[j] || nextRes[j]
-			case And:
-				res[j] = res[j] && nextRes[j]
-			}
+		compMasks[i] = mask
+	}
+
+	if len(compMasks) == 0 {
+		return df.Copy()
+	}
+
+	// Combine selection masks word-wise (RFC §5 rule 1): no per-row boolean
+	// materialization until the final row extraction.
+	for i := 1; i < len(compMasks); i++ {
+		switch agg {
+		case Or:
+			compMasks[0].OrInto(compMasks[i])
+		case And:
+			compMasks[0].AndInto(compMasks[i])
 		}
 	}
-	return df.Subset(res)
+	return df.Subset(compMasks[0].Rows())
 }
 
 // Order is the ordering structure
@@ -1467,37 +1459,85 @@ func (df DataFrame) Arrange(order ...Order) DataFrame {
 		}
 	}
 
-	// Initialize the index that will be used to store temporary and final order
-	// results.
-	origIdx := make([]int, df.nrows)
-	for i := 0; i < df.nrows; i++ {
-		origIdx[i] = i
+	// Compose the final permutation on row numbers only: successive stable
+	// sorts applied from the last key to the first reproduce the multi-key
+	// stable ordering without materializing any intermediate column.
+	perm := make([]int, df.nrows)
+	for i := range perm {
+		perm[i] = i
 	}
-
-	swapOrigIdx := func(newidx []int) {
-		newOrigIdx := make([]int, len(newidx))
-		for k, i := range newidx {
-			newOrigIdx[k] = origIdx[i]
-		}
-		origIdx = newOrigIdx
-	}
-
-	suborder := origIdx
 	for i := len(order) - 1; i >= 0; i-- {
-		colname := order[i].Colname
-		idx := df.ColIndex(colname)
-		nextSeries := df.columns[idx].Subset(suborder)
-
-		// Use parallel merge-sort for large DataFrames (> 100k rows).
-		const parallelThreshold = 100_000
-		if df.nrows > parallelThreshold {
-			suborder = parallelOrder(nextSeries, order[i].Reverse)
-		} else {
-			suborder = nextSeries.Order(order[i].Reverse)
-		}
-		swapOrigIdx(suborder)
+		col := df.columns[df.ColIndex(order[i].Colname)]
+		perm = sortPermBy(col, perm, order[i].Reverse)
 	}
-	return df.Subset(origIdx)
+
+	// RFC §9.1: materialize once, behind a read-only snapshot view that
+	// carries mandatory measurement metadata.
+	view, err := newSortView(perm, df.columnsByteSize())
+	if err != nil {
+		return DataFrame{Err: err}
+	}
+	columns := make([]series.Series, df.ncols)
+	for i, col := range df.columns {
+		gathered := col.GatherRows(view.rows)
+		gathered.Name = col.Name
+		columns[i] = gathered
+	}
+	nrows, ncols, err := checkColumnsDimensions(columns...)
+	if err != nil {
+		return DataFrame{Err: err}
+	}
+	return DataFrame{columns: columns, ncols: ncols, nrows: nrows}
+}
+
+// sortView is the RFC §9.1 read-only snapshot over a materialized sort: an
+// index of rows over the sorted buffers plus mandatory measurement metadata
+// (exact post-sort cardinality and byte size feed memory estimation and the
+// future Arrow zero-copy exchange). spillRatio is 0 while everything stays
+// in memory (disk spill is future work, §9.3).
+type sortView struct {
+	rows          []int
+	numRows       int
+	totalByteSize int
+	spillRatio    float64
+}
+
+// newSortView constructs the snapshot view; missing measurements are a
+// constructor error, not a warning.
+func newSortView(rows []int, totalByteSize int) (sortView, error) {
+	if rows == nil || totalByteSize < 0 {
+		return sortView{}, fmt.Errorf("arrange: sort view requires measurement metadata")
+	}
+	return sortView{
+		rows:          rows,
+		numRows:       len(rows),
+		totalByteSize: totalByteSize,
+		spillRatio:    0,
+	}, nil
+}
+
+// columnsByteSize estimates the net buffer bytes of the frame, matching the
+// MemoryUsage accounting used by Info.
+func (df DataFrame) columnsByteSize() int {
+	total := 0
+	for _, col := range df.columns {
+		switch col.Type() {
+		case series.Int, series.Float:
+			total += df.nrows * 8
+		case series.Bool:
+			total += df.nrows
+		case series.Time:
+			total += df.nrows * 24
+		case series.String:
+			total += df.nrows * 16
+			for i := 0; i < col.Len(); i++ {
+				if !col.IsNA(i) {
+					total += len(col.Record(i))
+				}
+			}
+		}
+	}
+	return total
 }
 
 // Capply applies the given function to the columns of a DataFrame
@@ -2960,18 +3000,18 @@ func (df DataFrame) InnerJoin(b DataFrame, keys ...string) DataFrame {
 	}
 	aCols := df.columns
 	bCols := b.columns
-	newCols := jk.newCols
 
 	// Build hash table on b.
-	ht := buildHashTable(b, jk.iKeysB)
+	ki := newKeyIndexer(bCols, jk.iKeysB, aCols, jk.iKeysA)
+	ki.build(b.nrows)
 
+	var pairs joinPairs
 	for i := 0; i < df.nrows; i++ {
-		aKey := buildJoinKey(aCols, jk.iKeysA, i)
-		for _, j := range ht[aKey] {
-			appendMatchedRow(newCols, aCols, bCols, jk, i, j)
+		for _, j := range ki.matches(aCols, jk.iKeysA, i) {
+			pairs.addMatched(i, j)
 		}
 	}
-	return New(newCols...)
+	return assembleJoin(aCols, bCols, jk, pairs)
 }
 
 // LeftJoin returns a DataFrame containing the left join of two DataFrames.
@@ -2986,22 +3026,22 @@ func (df DataFrame) LeftJoin(b DataFrame, keys ...string) DataFrame {
 	}
 	aCols := df.columns
 	bCols := b.columns
-	newCols := jk.newCols
 
-	ht := buildHashTable(b, jk.iKeysB)
+	ki := newKeyIndexer(bCols, jk.iKeysB, aCols, jk.iKeysA)
+	ki.build(b.nrows)
 
+	var pairs joinPairs
 	for i := 0; i < df.nrows; i++ {
-		aKey := buildJoinKey(aCols, jk.iKeysA, i)
-		matches := ht[aKey]
+		matches := ki.matches(aCols, jk.iKeysA, i)
 		if len(matches) == 0 {
-			appendLeftOnlyRow(newCols, aCols, jk, i)
+			pairs.addLeftOnly(i)
 		} else {
 			for _, j := range matches {
-				appendMatchedRow(newCols, aCols, bCols, jk, i, j)
+				pairs.addMatched(i, j)
 			}
 		}
 	}
-	return New(newCols...)
+	return assembleJoin(aCols, bCols, jk, pairs)
 }
 
 // RightJoin returns a DataFrame containing the right join of two DataFrames.
@@ -3016,30 +3056,28 @@ func (df DataFrame) RightJoin(b DataFrame, keys ...string) DataFrame {
 	}
 	aCols := df.columns
 	bCols := b.columns
-	newCols := jk.newCols
 
 	// Build hash table on a (left side).
-	htA := make(map[string][]int, df.nrows)
-	for i := 0; i < df.nrows; i++ {
-		k := buildJoinKey(aCols, jk.iKeysA, i)
-		htA[k] = append(htA[k], i)
-	}
+	ki := newKeyIndexer(aCols, jk.iKeysA, bCols, jk.iKeysB)
+	ki.build(df.nrows)
 
-	// First pass: emit matched rows, preserving b's row order.
+	var pairs joinPairs
+	// First pass: emit matched rows, preserving b's row order. Cache the
+	// matches so the second pass does not re-run the lookups.
+	matchCache := make([][]int, b.nrows)
 	for j := 0; j < b.nrows; j++ {
-		bKey := buildJoinKey(bCols, jk.iKeysB, j)
-		for _, i := range htA[bKey] {
-			appendMatchedRow(newCols, aCols, bCols, jk, i, j)
+		matchCache[j] = ki.matches(bCols, jk.iKeysB, j)
+		for _, i := range matchCache[j] {
+			pairs.addMatched(i, j)
 		}
 	}
 	// Second pass: emit right-only rows (b rows with no match in a).
 	for j := 0; j < b.nrows; j++ {
-		bKey := buildJoinKey(bCols, jk.iKeysB, j)
-		if len(htA[bKey]) == 0 {
-			appendRightOnlyRow(newCols, bCols, jk, j)
+		if len(matchCache[j]) == 0 {
+			pairs.addRightOnly(j)
 		}
 	}
-	return New(newCols...)
+	return assembleJoin(aCols, bCols, jk, pairs)
 }
 
 // OuterJoin returns a DataFrame containing the outer join of two DataFrames.
@@ -3054,21 +3092,21 @@ func (df DataFrame) OuterJoin(b DataFrame, keys ...string) DataFrame {
 	}
 	aCols := df.columns
 	bCols := b.columns
-	newCols := jk.newCols
 
 	// Build hash table on b; track which b rows were matched.
-	htB := buildHashTable(b, jk.iKeysB)
+	ki := newKeyIndexer(bCols, jk.iKeysB, aCols, jk.iKeysA)
+	ki.build(b.nrows)
 	bMatched := make([]bool, b.nrows)
 
+	var pairs joinPairs
 	// Iterate a: emit matched rows; emit left-only rows for unmatched a rows.
 	for i := 0; i < df.nrows; i++ {
-		aKey := buildJoinKey(aCols, jk.iKeysA, i)
-		matches := htB[aKey]
+		matches := ki.matches(aCols, jk.iKeysA, i)
 		if len(matches) == 0 {
-			appendLeftOnlyRow(newCols, aCols, jk, i)
+			pairs.addLeftOnly(i)
 		} else {
 			for _, j := range matches {
-				appendMatchedRow(newCols, aCols, bCols, jk, i, j)
+				pairs.addMatched(i, j)
 				bMatched[j] = true
 			}
 		}
@@ -3076,10 +3114,10 @@ func (df DataFrame) OuterJoin(b DataFrame, keys ...string) DataFrame {
 	// Emit right-only rows for b rows that had no match in a.
 	for j := 0; j < b.nrows; j++ {
 		if !bMatched[j] {
-			appendRightOnlyRow(newCols, bCols, jk, j)
+			pairs.addRightOnly(j)
 		}
 	}
-	return New(newCols...)
+	return assembleJoin(aCols, bCols, jk, pairs)
 }
 
 // CrossJoin returns a DataFrame containing the cross join of two DataFrames.

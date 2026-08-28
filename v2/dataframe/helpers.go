@@ -3,6 +3,7 @@ package dataframe
 import (
 	"fmt"
 	"runtime"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -226,49 +227,15 @@ func valueGreater(a, b interface{}) bool {
 }
 
 // seriesRowLess compares two valid rows of the same Series by typed value.
+// It delegates to the series comparison kernel.
 func seriesRowLess(s series.Series, a, b int) bool {
-	switch s.Type() {
-	case series.Int:
-		va, _ := s.Int64At(a)
-		vb, _ := s.Int64At(b)
-		return va < vb
-	case series.Float:
-		return s.FloatAt(a) < s.FloatAt(b)
-	case series.String:
-		return s.Record(a) < s.Record(b)
-	case series.Bool:
-		va, _ := s.BoolAt(a)
-		vb, _ := s.BoolAt(b)
-		return !va && vb
-	case series.Time:
-		va, _ := s.TimeAt(a)
-		vb, _ := s.TimeAt(b)
-		return va.Before(vb)
-	}
-	return false
+	return series.RowLess(s, a, b)
 }
 
-// seriesRowGreater compares two valid rows of the same Series by typed value.
+// seriesRowGreater compares two valid rows of the same Series by typed
+// value. It delegates to the series comparison kernel.
 func seriesRowGreater(s series.Series, a, b int) bool {
-	switch s.Type() {
-	case series.Int:
-		va, _ := s.Int64At(a)
-		vb, _ := s.Int64At(b)
-		return va > vb
-	case series.Float:
-		return s.FloatAt(a) > s.FloatAt(b)
-	case series.String:
-		return s.Record(a) > s.Record(b)
-	case series.Bool:
-		va, _ := s.BoolAt(a)
-		vb, _ := s.BoolAt(b)
-		return va && !vb
-	case series.Time:
-		va, _ := s.TimeAt(a)
-		vb, _ := s.TimeAt(b)
-		return va.After(vb)
-	}
-	return false
+	return series.RowGreater(s, a, b)
 }
 
 // numWorkers returns the number of parallel workers to use for concurrent
@@ -281,58 +248,71 @@ func numWorkers() int {
 	return n
 }
 
-// parallelOrder returns the sort permutation for s using a parallel merge-sort
-// across numWorkers() goroutines. NaN elements are pushed to the end.
-// This is a drop-in replacement for series.Series.Order for large slices.
-func parallelOrder(s series.Series, reverse bool) []int {
-	n := s.Len()
-	workers := numWorkers()
-	if workers < 2 || n < 2 {
-		return s.Order(reverse)
+// sortPermBy reorders perm so that the referenced col values are in stable
+// sorted order. Missing values stay at the end in order of appearance, and
+// no column data is materialized: the sort operates on row numbers only.
+func sortPermBy(col series.Series, perm []int, reverse bool) []int {
+	valid := make([]int, 0, len(perm))
+	var nas []int
+	for _, r := range perm {
+		if col.IsNA(r) {
+			nas = append(nas, r)
+		} else {
+			valid = append(valid, r)
+		}
 	}
+	const parallelThreshold = 100_000
+	if len(valid) > parallelThreshold && numWorkers() >= 2 {
+		valid = parallelSortRows(col, valid, reverse)
+	} else {
+		sort.SliceStable(valid, func(a, b int) bool {
+			if reverse {
+				return series.RowGreater(col, valid[a], valid[b])
+			}
+			return series.RowLess(col, valid[a], valid[b])
+		})
+	}
+	return append(valid, nas...)
+}
 
-	// Split into chunks, sort each chunk in parallel, then merge.
-	chunkSize := (n + workers - 1) / workers
+// parallelSortRows sorts row numbers by col values using a parallel
+// chunked merge-sort across numWorkers() goroutines.
+func parallelSortRows(col series.Series, rows []int, reverse bool) []int {
+	workers := numWorkers()
+	chunkSize := (len(rows) + workers - 1) / workers
 	chunks := make([]sortChunk, 0, workers)
 
 	var wg sync.WaitGroup
 	mu := sync.Mutex{}
 
-	for start := 0; start < n; start += chunkSize {
+	for start := 0; start < len(rows); start += chunkSize {
 		end := start + chunkSize
-		if end > n {
-			end = n
+		if end > len(rows) {
+			end = len(rows)
 		}
 		wg.Add(1)
 		go func(lo, hi int) {
 			defer wg.Done()
-			sub := s.Subset(makeRange(lo, hi))
-			sorted := sub.Order(reverse)
-			// Translate back to original indexes.
-			for i, v := range sorted {
-				sorted[i] = lo + v
-			}
+			sub := make([]int, hi-lo)
+			copy(sub, rows[lo:hi])
+			sort.SliceStable(sub, func(a, b int) bool {
+				if reverse {
+					return series.RowGreater(col, sub[a], sub[b])
+				}
+				return series.RowLess(col, sub[a], sub[b])
+			})
 			mu.Lock()
-			chunks = append(chunks, sortChunk{sorted})
+			chunks = append(chunks, sortChunk{sub})
 			mu.Unlock()
 		}(start, end)
 	}
 	wg.Wait()
 
 	// k-way merge of sorted chunks.
-	return kMerge(s, chunks, reverse)
+	return kMerge(col, chunks, reverse)
 }
 
-// makeRange returns [lo, lo+1, ..., hi-1].
-func makeRange(lo, hi int) []int {
-	out := make([]int, hi-lo)
-	for i := range out {
-		out[i] = lo + i
-	}
-	return out
-}
-
-// sortChunk is a sorted index chunk used by parallelOrder / kMerge.
+// sortChunk is a sorted index chunk used by parallelSortRows / kMerge.
 type sortChunk struct{ idx []int }
 
 // heapEntry is a position pointer into a sortChunk, used by the k-way merge heap.

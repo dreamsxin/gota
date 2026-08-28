@@ -166,8 +166,11 @@ guide.
   obligation, the `Element`/`Elem` API and the `Rapply` family were removed
   in the same step instead of Milestone 4, and the module path moved to
   `/v2` with the directory move.
-- [ ] Milestone 2: batch kernels for filters, sorting, joins, with
-  golden-output tests; `BatchTransform` registration.
+- [x] Milestone 2: batch kernels landed - selection masks with word-wise
+  AND/OR for Filter and Query, single-pass permutation arrange with the
+  §9.1 measured snapshot view, typed single-key hash joins with batched
+  output assembly, and the `BatchTransform`/`MapFloat64`/`MapInt64`
+  registration API; golden-output tests and benchmark anchors committed.
 - [ ] Milestone 3: DType system; `Categorical` as the Dictionary DType;
   chain-local intern pool and byte-budget chunking.
 - [ ] Milestone 4: split Excel/Parquet/SQL adapters into submodules; Int

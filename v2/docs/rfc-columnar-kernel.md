@@ -15,6 +15,16 @@ Series in `column[T]` buffers with validity bitmaps; `Element`/`Elem` and
 `Rapply` were removed in the same step; measured results: Mean 1M Float
 4.9 ms / 8 MB → 0.13 ms / 0 allocs, Copy 100k Int 252 µs / 1.6 MB →
 90 µs / 0.8 MB.
+Revised: 2026-08-28 (Milestone 2 landed) - batch kernels replaced the
+remaining hot paths: comparison kernels produce selection masks combined
+word-wise (Filter, Query), Arrange composes permutations on row numbers and
+materializes once behind the §9.1 measured snapshot view, single Int/Bool/
+String key joins hash typed values and assemble outputs in batched gathers,
+and `BatchTransform`/`MapFloat64`/`MapInt64` register UDFs per §9.4.
+Anchored measurements (i5-12400F): Compare 100k Int 1.18 ms; Filter
+(2 AND conditions, 100k rows) 1.55 ms / 26 allocs; InnerJoin 20k×20k
+single Int key 1.73 ms; Arrange 100k×20 82 ms / 57 allocs (single
+materialization pass).
 Scope: Series storage layout, batch kernels, DType system, and the v2.0.0
 release path. This is a design document, not a feature list; every
 performance claim below is measured on the v1 implementation by the
