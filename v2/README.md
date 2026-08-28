@@ -66,7 +66,8 @@ landed with Milestone 3.
   - [String operations](#string-operations)
   - [Time accessors](#time-accessors)
   - [Categorical](#categorical)
-- [Additional DataFrame APIs (v1.2.1)](#additional-dataframe-apis-v121)
+- [Columnar storage and DTypes](#columnar-storage-and-dtypes)
+- [Additional DataFrame APIs](#additional-dataframe-apis)
   - [Shift](#shift)
   - [Assign](#assign)
   - [Explode](#explode)
@@ -74,11 +75,12 @@ landed with Milestone 3.
   - [Stack / Unstack](#stack--unstack)
   - [Resample](#resample)
   - [Parallel operations](#parallel-operations)
-- [Additional I/O APIs (v1.2.1)](#additional-io-apis-v121)
+- [Additional I/O APIs](#additional-io-apis)
   - [JSON Lines (NDJSON)](#json-lines-ndjson)
   - [Excel — sheet selection](#excel--sheet-selection)
   - [SQL — named placeholders](#sql--named-placeholders)
   - [CSV streaming](#csv-streaming)
+- [Performance report](#performance-report)
 - [License](#license)
 
 ---
@@ -241,17 +243,19 @@ for output buffers.
 ```go
 sch := df.Schema()
 
-sch.Names()  // []string{"A", "B"}
-sch.Types()  // []series.Type{series.String, series.Int}
+sch.Names()   // []string{"A", "B"}
+sch.Types()   // []series.Type{series.String, series.Int}
+sch.DTypes()  // []series.DType — logical kernel types (RFC §4)
 sch.Field("A")         // (Field, bool)
-sch.Equal(otherSchema) // fast layout compatibility check
+sch.Equal(otherSchema) // layout compatibility incl. DTypes and nullability
 
 // Zero-row frame with the same layout (streaming accumulators, output buffers)
 empty := dataframe.FromSchema(sch)
 ```
 
-Every v1.x column is nullable (`Field.Nullable` is always `true`); the field
-exists so future non-nullable storage can appear without an API change.
+`Field.Nullable` derives from the data: a column without missing values is
+non-nullable, letting kernels skip validity work entirely. Dictionary-encoded
+columns report the Dictionary DType via `Field.DType`.
 
 ### Updating values
 
@@ -406,6 +410,23 @@ mean := func(s series.Series) series.Series {
 df.Capply(mean) // column-wise
 // Row-wise apply (Rapply) was removed in v2; express row logic as
 // column-wise operations or Mutate instead.
+```
+
+Batch UDFs (RFC §9.4) run over column batches; scalar row logic goes
+through the masked-loop kernels:
+
+```go
+double := dataframe.BatchTransform(func(cols []series.Series) ([]series.Series, error) {
+    out := make([]series.Series, len(cols))
+    for i, c := range cols {
+        out[i] = series.MapFloat64(c, func(v float64) float64 { return v * 2 })
+    }
+    return out, nil
+})
+df.ApplyBatch(double)
+
+series.MapFloat64(s, f) // masked loop over the buffer; missing stays missing
+series.MapInt64(s, g)
 ```
 
 ### Cumulative statistics (DataFrame)
@@ -582,7 +603,7 @@ rows := midf.Loc("2024")       // partial key (all 2024 rows)
 
 `IndexedDataFrame` and `MultiIndexedDataFrame` are lookup wrappers. Operations
 such as `Loc` return a regular `DataFrame`; indexes are not automatically
-propagated through arbitrary DataFrame transformations in v1.2.1.
+propagated through arbitrary DataFrame transformations.
 
 ### Chaining operations
 
@@ -592,11 +613,10 @@ Most transformation methods return a new DataFrame. `DataFrame.Set`,
 Series. Call `Copy` before these methods when the original value must remain
 unchanged.
 
-`NewNoCopy` shares the element storage of its input Series, not the Series
-headers: in-place element writes (`Series.Set`) are visible through the
-DataFrame, but `Series.Append` reassigns the slice header and is **not**
-visible. The safe rule is to stop touching the Series after handing it to
-`NewNoCopy`.
+`NewNoCopy` shares the column buffers of its input Series, not the Series
+headers: in-place writes (`Series.Set`) are visible through the DataFrame,
+but `Series.Append` reassigns the buffer header and is **not** visible. The
+safe rule is to stop touching the Series after handing it to `NewNoCopy`.
 
 DataFrame-returning operations propagate sticky errors: once an error occurs,
 subsequent chain operations become no-ops until the error is inspected:
@@ -943,11 +963,11 @@ Conversion rules:
 
 ### Categorical
 
-`Categorical` is a standalone memory-efficient representation for
-low-cardinality string data (country codes, status labels, enum-like columns).
-It uses dictionary encoding: a sorted slice of unique strings plus a `[]int32`
-code array. In v1.2.1 it is not a native `Series.Type`; use `ToSeries` before
-placing it in a DataFrame.
+`Categorical` is the memory-efficient representation for low-cardinality
+string data (country codes, status labels, enum-like columns): a sorted slice
+of unique strings plus a `[]int32` code array. In v2 it is also the
+Dictionary DType: it converts into a dictionary-backed Series that reads like
+a String column while keeping the codes + categories storage.
 
 ```go
 // Create from string slice
@@ -956,6 +976,16 @@ cat := series.NewCategorical([]string{"US", "UK", "US", "DE"}, "country")
 // Convert from/to regular String Series
 cat, err := series.CategoricalFromSeries(s)
 s := cat.ToSeries()
+
+// v2: the Dictionary DType view — a dictionary-backed Series
+ds := cat.ToDictionarySeries()
+ds.Type()             // series.String — reads like a String column
+ds.DType().Physical() // series.PhysDictionary
+series.DictionaryCategories(ds.DType()) // (categories, true)
+cat.DType()           // the Dictionary DType for schemas
+
+// Intern the categories through a chain-local pool (RFC §9.2)
+cat = cat.InternCategories(ctx)
 
 // Inspect
 cat.Len()          // number of rows
@@ -1022,7 +1052,60 @@ t.Weekday() // [2, NaN]  (Tuesday)
 
 ---
 
-### Additional DataFrame APIs (v1.2.1)
+## Columnar storage and DTypes
+
+Every Series is stored as a contiguous typed buffer (`[]int64`, `[]float64`,
+`[]string`, `[]bool`, `[]time.Time`) with a validity bitmap: one bit per row,
+`nil` when the column has no missing values. Missing is missing — Int columns
+distinguish `0` from missing, and the v1 NaN-as-sentinel tricks are gone.
+
+Typed per-row accessors replace the v1 `Element` interface:
+
+```go
+s.Val(i)        // interface{} value, nil when missing
+s.IsNA(i)       // true when missing
+s.Record(i)     // string form ("NaN" when missing)
+s.FloatAt(i)    // float64, NaN when missing or unconvertible
+s.Int64At(i)    // (int64, error) strict conversion
+s.BoolAt(i)     // (bool, error)
+s.TimeAt(i)     // (time.Time, error)
+s.GatherRows([]int{2, -1, 0}) // gather; negative index becomes missing
+```
+
+Logical types are data (RFC §4):
+
+```go
+s.DType()                  // series.DType of the column
+series.DTypeOf(series.Int) // physical singletons: DTInt64, DTFloat64, ...
+
+dt := series.NewDictionaryDType(cats, false)
+dt.Physical()              // series.PhysDictionary
+dt.Metadata()              // {"cardinality": "3", "ordered": "false"}
+series.DictionaryCategories(s.DType()) // ([]string, bool)
+```
+
+Dictionary-encoded columns read like String columns (`Type()` stays
+`String`) but store int32 codes into a shared category list — see
+[Categorical](#categorical). Selection masks are bitmaps combined word-wise
+(`Series.CompareMask` + `Mask`), and `Arrange` materializes once behind the
+measured §9.1 snapshot view.
+
+Chain-local interning (RFC §9.2): attach an `ExecutionContext` to a frame to
+canonicalize repeated GroupBy key strings. The pool is lock-free by contract
+(one context per chain) and drops in O(1):
+
+```go
+ctx := series.NewExecutionContext()
+defer ctx.Release()
+df.WithExecutionContext(ctx).GroupBy("k1", "k2", "k3") // keys interned
+```
+
+Streaming batches flush on a 1.5 GiB net-data byte budget
+(`dataframe.BatchByteBudget`, RFC §9.3) — see [CSV streaming](#csv-streaming).
+
+---
+
+### Additional DataFrame APIs
 
 #### Shift
 
@@ -1098,7 +1181,7 @@ groups.AggregationParallel(typs, colnames)              // parallel GroupBy aggr
 
 ---
 
-### Additional I/O APIs (v1.2.1)
+### Additional I/O APIs
 
 #### JSON Lines (NDJSON)
 
@@ -1136,6 +1219,39 @@ err := dataframe.ScanCSV(f, 1000, func(batch dataframe.DataFrame) error {
     return nil
 }, dataframe.DetectDelimiter(true))
 ```
+
+Regardless of `batchSize`, a batch also flushes when it reaches the 1.5 GiB
+net-data byte budget (`dataframe.BatchByteBudget`, RFC §9.3): chunk
+boundaries follow bytes, never row counts, with no exceptions.
+
+---
+
+## Performance report
+
+Paired measurements of the v1.x line (repository root) and this module,
+taken in the same session on the same machine (12th Gen Intel i5-12400F,
+low iteration counts). Reproduce with `go test -bench=. -benchmem ./...`
+from the repository root (v1) and `go test -C v2 -bench=. -benchmem ./...`
+(v2); the anchor benchmarks live in `series/benchmarks_test.go`,
+`dataframe/benchmark_test.go`, and `dataframe/milestone2_test.go`.
+
+| Workload | v1.x | v2 | Change |
+|---|---|---|---|
+| `Mean` over 1M Float rows | 4.82 ms, 8.0 MB alloc | 0.24 ms, 0 allocs | 20× faster, allocation-free |
+| `Copy` of 100k Int rows | 513 µs, 1.6 MB | 71 µs, 0.8 MB | 7.2× faster, half the memory |
+| `Compare` mask over 100k Int rows | 1.16 ms | 0.62 ms | 1.9× faster |
+| `Filter` (two AND conditions, 100k rows) | 4.08 ms, 8.2 MB, 50 allocs | 1.10 ms, 5.5 MB, 26 allocs | 3.7× faster |
+| `InnerJoin` 20k×20k on an Int key | 11.1 ms, 240k allocs | 2.14 ms, 20k allocs | 5.2× faster, 12× fewer allocs |
+| `Arrange` 100k×20 columns, 3 keys | 117.8 ms | 86.9 ms, 57 allocs | 1.4× faster |
+| Per-element memory, Int/Float | 16 B (struct + flag) | 8.125 B (value + bitmap bit) | 2× denser |
+| Per-element memory, String | 24 B | 16 B + 1 bit | 1.5× denser |
+
+The wins come from the columnar kernel (see
+[docs/rfc-columnar-kernel.md](docs/rfc-columnar-kernel.md)): contiguous
+typed buffers with validity bitmaps instead of per-element structs, no
+interface dispatch in hot loops, selection masks combined word-wise, typed
+single-key hash joins with batched output assembly, and single-pass arrange
+materialization behind the measured snapshot view.
 
 ---
 

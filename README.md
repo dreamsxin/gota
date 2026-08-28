@@ -9,13 +9,14 @@ API rather than pandas API parity. The API is still evolving, so review release
 notes when upgrading.
 
 **v2 development:** the `v2/` directory carries the columnar kernel module
-`github.com/dreamsxin/gota/v2` (typed column buffers with validity bitmaps,
-see [v2/docs/rfc-columnar-kernel.md](v2/docs/rfc-columnar-kernel.md)),
-developed per Go's major-version subdirectory layout. It is a clean break
-from the API documented here: the `Element`/`Elem` surface and the `Rapply`
-family are removed in favor of typed Series accessors and column-wise apply.
-This README documents the v1.x API; until v2.0.0 is tagged, v1.x receives
-fixes only.
+`github.com/dreamsxin/gota/v2` — see **[v2/README.md](v2/README.md)** for
+the v2 API documentation and the performance report, and
+[v2/docs/rfc-columnar-kernel.md](v2/docs/rfc-columnar-kernel.md) for the
+design. It is developed per Go's major-version subdirectory layout and is a
+clean break from the API documented here: the `Element`/`Elem` surface and
+the `Rapply` family are removed in favor of typed Series accessors and
+column-wise apply. This README documents the v1.x API; until v2.0.0 is
+tagged, v1.x receives fixes only.
 
 ## Table of Contents
 
