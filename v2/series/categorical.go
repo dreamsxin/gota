@@ -62,11 +62,18 @@ func NewCategorical(values []string, name string) Categorical {
 	return Categorical{categories: cats, codes: codes, Name: name}
 }
 
-// CategoricalFromSeries converts a String Series to a Categorical.
-// NaN elements become code -1.
+// CategoricalFromSeries converts a String Series (plain or dictionary
+// encoded) to a Categorical. Missing elements become code -1.
 func CategoricalFromSeries(s Series) (Categorical, error) {
 	if s.Type() != String {
 		return Categorical{}, fmt.Errorf("CategoricalFromSeries: expected String series, got %v", s.Type())
+	}
+	if elems, ok := s.elements.(dictionaryElements); ok {
+		codes := make([]int32, len(elems.codes))
+		copy(codes, elems.codes)
+		cats := make([]string, len(elems.categories))
+		copy(cats, elems.categories)
+		return Categorical{categories: cats, codes: codes, Name: s.Name}, nil
 	}
 	elems := s.elements.(stringElements)
 	vals := make([]string, s.Len())

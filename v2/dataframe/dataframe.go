@@ -40,6 +40,11 @@ type DataFrame struct {
 	ncols   int
 	nrows   int
 
+	// ctx is the optional chain-local execution context (RFC §9.2): its
+	// intern pool canonicalizes repeated GroupBy key strings. Propagated by
+	// shape-preserving operations; nil means no interning.
+	ctx *series.ExecutionContext
+
 	// deprecated: Use Error() instead
 	Err error
 }
@@ -142,10 +147,19 @@ func checkColumnsDimensions(se ...series.Series) (nrows, ncols int, err error) {
 // Copy returns a copy of the DataFrame
 func (df DataFrame) Copy() DataFrame {
 	copy := New(df.columns...)
+	copy.ctx = df.ctx
 	if df.Err != nil {
 		copy.Err = df.Err
 	}
 	return copy
+}
+
+// WithExecutionContext attaches a chain-local execution context (RFC §9.2)
+// whose intern pool canonicalizes repeated key strings during GroupBy. The
+// context propagates through shape-preserving operations.
+func (df DataFrame) WithExecutionContext(ctx *series.ExecutionContext) DataFrame {
+	df.ctx = ctx
+	return df
 }
 
 // String implements the Stringer interface for DataFrame
@@ -372,6 +386,7 @@ func (df DataFrame) Subset(indexes series.Indexes) DataFrame {
 		columns: columns,
 		ncols:   ncols,
 		nrows:   nrows,
+		ctx:     df.ctx,
 	}
 }
 
@@ -428,10 +443,12 @@ func (df DataFrame) Select(indexes SelectIndexes) DataFrame {
 	if err != nil {
 		return DataFrame{Err: err}
 	}
+	inheritedCtx := df.ctx
 	df = DataFrame{
 		columns: columns,
 		ncols:   ncols,
 		nrows:   nrows,
+		ctx:     inheritedCtx,
 	}
 	colnames := df.Names()
 	fixColnames(colnames)
@@ -460,10 +477,12 @@ func (df DataFrame) Drop(indexes SelectIndexes) DataFrame {
 	if err != nil {
 		return DataFrame{Err: err}
 	}
+	inheritedCtx := df.ctx
 	df = DataFrame{
 		columns: columns,
 		ncols:   ncols,
 		nrows:   nrows,
+		ctx:     inheritedCtx,
 	}
 	colnames := df.Names()
 	fixColnames(colnames)
@@ -558,6 +577,8 @@ func (df DataFrame) factorizeCompositeGroups(keyIdxs []int) ([]string, []int, []
 	groupCounts := make([]int, 0)
 	for row := 0; row < df.nrows; row++ {
 		key := buildGroupKey(df.columns, keyIdxs, row)
+		// Chain-local interning (RFC §9.2): canonicalize repeated keys.
+		key = df.ctx.Intern(key)
 		groupID, ok := groupIDs[key]
 		if !ok {
 			groupID = len(groupOrder)
@@ -1329,10 +1350,12 @@ func (df DataFrame) Mutate(ss ...series.Series) DataFrame {
 	if err != nil {
 		return DataFrame{Err: err}
 	}
+	inheritedCtx := df.ctx
 	df = DataFrame{
 		columns: columns,
 		ncols:   ncols,
 		nrows:   nrows,
+		ctx:     inheritedCtx,
 	}
 	colnames := df.Names()
 	fixColnames(colnames)
@@ -1487,7 +1510,7 @@ func (df DataFrame) Arrange(order ...Order) DataFrame {
 	if err != nil {
 		return DataFrame{Err: err}
 	}
-	return DataFrame{columns: columns, ncols: ncols, nrows: nrows}
+	return DataFrame{columns: columns, ncols: ncols, nrows: nrows, ctx: df.ctx}
 }
 
 // sortView is the RFC §9.1 read-only snapshot over a materialized sort: an

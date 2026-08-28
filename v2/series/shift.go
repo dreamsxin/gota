@@ -28,10 +28,29 @@ func (s Series) Shift(periods int) Series {
 		ret.elements = shiftColumn(elems, n, periods, abs)
 	case timeElements:
 		ret.elements = shiftColumn(elems, n, periods, abs)
+	case dictionaryElements:
+		ret.elements = shiftDictionary(elems, n, periods, abs)
 	default:
 		return s.Copy()
 	}
 	return ret
+}
+
+// shiftDictionary shifts codes directly, keeping the shared dictionary.
+func shiftDictionary(src dictionaryElements, n, periods, abs int) dictionaryElements {
+	codes := make([]int32, n)
+	if periods > 0 {
+		copy(codes[abs:], src.codes[:n-abs])
+		for i := 0; i < abs; i++ {
+			codes[i] = -1
+		}
+	} else {
+		copy(codes, src.codes[abs:])
+		for i := n - abs; i < n; i++ {
+			codes[i] = -1
+		}
+	}
+	return dictionaryElements{codes: codes, categories: src.categories, ordered: src.ordered}
 }
 
 // shiftColumn copies values by |periods| positions and marks the vacated

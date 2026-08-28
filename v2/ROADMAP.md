@@ -171,8 +171,13 @@ guide.
   §9.1 measured snapshot view, typed single-key hash joins with batched
   output assembly, and the `BatchTransform`/`MapFloat64`/`MapInt64`
   registration API; golden-output tests and benchmark anchors committed.
-- [ ] Milestone 3: DType system; `Categorical` as the Dictionary DType;
-  chain-local intern pool and byte-budget chunking.
+- [x] Milestone 3: DType system landed - `DType` interface with physical
+  singletons and the Dictionary logical type; dictionary-encoded columns
+  (`dictionaryElements`) behave as String columns with DType identity;
+  Schema exposes `Field.DType` and derives `Nullable` from the data;
+  chain-local `ExecutionContext` intern pool feeds GroupBy keys (RFC §9.2,
+  lock-free by contract); ScanCSV flushes on the 1.5 GiB byte budget
+  (RFC §9.3).
 - [ ] Milestone 4: split Excel/Parquet/SQL adapters into submodules; Int
   columns distinguish 0 from missing.
 - [ ] Publish the CHANGELOG entry, migration guide, and tag `v2/v2.0.0`.

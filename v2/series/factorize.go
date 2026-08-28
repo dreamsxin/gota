@@ -14,6 +14,8 @@ func (s Series) Factorize() (labels []string, codes []int, counts []int, ok bool
 		return factorizeBoolElements(elems)
 	case floatElements:
 		return factorizeFloatElements(elems)
+	case dictionaryElements:
+		return factorizeDictionaryElements(elems)
 	default:
 		return nil, nil, nil, false
 	}
@@ -252,6 +254,41 @@ func factorizeBoolElements(elems boolElements) ([]string, []int, []int, bool) {
 				labels = append(labels, strconv.FormatBool(key))
 				counts = append(counts, 0)
 			}
+		}
+		codes[row] = groupID
+		counts[groupID]++
+	}
+	return labels, codes, counts, true
+}
+
+// factorizeDictionaryElements groups dictionary codes directly: codes are
+// already dense integers, so no hashing of string values is needed.
+func factorizeDictionaryElements(elems dictionaryElements) ([]string, []int, []int, bool) {
+	nCats := len(elems.categories)
+	firstSeen := make([]int, nCats)
+	for i := range firstSeen {
+		firstSeen[i] = -1
+	}
+	labels := make([]string, 0, nCats+1)
+	counts := make([]int, 0, nCats+1)
+	codes := make([]int, len(elems.codes))
+	naGroup := -1
+	for row, c := range elems.codes {
+		var groupID int
+		if c < 0 {
+			if naGroup == -1 {
+				naGroup = len(labels)
+				labels = append(labels, "<nil>")
+				counts = append(counts, 0)
+			}
+			groupID = naGroup
+		} else {
+			if firstSeen[c] == -1 {
+				firstSeen[c] = len(labels)
+				labels = append(labels, elems.categories[c])
+				counts = append(counts, 0)
+			}
+			groupID = firstSeen[c]
 		}
 		codes[row] = groupID
 		counts[groupID]++

@@ -30,6 +30,8 @@ func (s Series) IsNA(i int) bool {
 		return !elems.isValid(i)
 	case timeElements:
 		return !elems.isValid(i)
+	case dictionaryElements:
+		return elems.codes[i] < 0
 	default:
 		return true
 	}
@@ -51,6 +53,9 @@ func (s Series) Val(i int) interface{} {
 		return elems.data[i]
 	case timeElements:
 		return elems.data[i]
+	case dictionaryElements:
+		sv, _ := elems.strAt(i)
+		return sv
 	default:
 		return nil
 	}
@@ -80,6 +85,13 @@ func (s Series) FloatAt(i int) float64 {
 		return 0
 	case timeElements:
 		return float64(elems.data[i].Unix())
+	case dictionaryElements:
+		if sv, ok := elems.strAt(i); ok {
+			if f, err := strconv.ParseFloat(sv, 64); err == nil {
+				return f
+			}
+		}
+		return math.NaN()
 	default:
 		return math.NaN()
 	}
@@ -122,6 +134,11 @@ func (s Series) Int64At(i int) (int64, error) {
 		return 0, nil
 	case timeElements:
 		return elems.data[i].Unix(), nil
+	case dictionaryElements:
+		if sv, ok := elems.strAt(i); ok {
+			return strconv.ParseInt(sv, 10, 64)
+		}
+		return 0, fmt.Errorf("can't convert NaN to int")
 	default:
 		return 0, fmt.Errorf("can't convert NaN to int")
 	}
@@ -162,6 +179,17 @@ func (s Series) BoolAt(i int) (bool, error) {
 		return false, fmt.Errorf("can't convert String \"%v\" to bool", elems.data[i])
 	case timeElements:
 		return elems.data[i].IsZero(), nil
+	case dictionaryElements:
+		if sv, ok := elems.strAt(i); ok {
+			switch strings.ToLower(sv) {
+			case "true", "t", "1":
+				return true, nil
+			case "false", "f", "0":
+				return false, nil
+			}
+			return false, fmt.Errorf("can't convert String \"%v\" to bool", sv)
+		}
+		return false, fmt.Errorf("can't convert NaN to bool")
 	default:
 		return false, fmt.Errorf("can't convert NaN to bool")
 	}
@@ -188,6 +216,11 @@ func (s Series) TimeAt(i int) (time.Time, error) {
 			return time.Time{}, err
 		}
 		return t, nil
+	case dictionaryElements:
+		if sv, ok := elems.strAt(i); ok {
+			return time.ParseInLocation(time.RFC3339, sv, time.Local)
+		}
+		return time.Time{}, fmt.Errorf("can't convert NaN to time")
 	default:
 		return time.Time{}, fmt.Errorf("can't convert NaN to time")
 	}
@@ -213,6 +246,9 @@ func (s Series) Record(i int) string {
 		return "false"
 	case timeElements:
 		return elems.data[i].Format(time.RFC3339)
+	case dictionaryElements:
+		sv, _ := elems.strAt(i)
+		return sv
 	default:
 		return "NaN"
 	}
@@ -221,6 +257,16 @@ func (s Series) Record(i int) string {
 // appendAs appends the parsed form of value to the store, which must hold
 // the buffer matching t. Unparseable values are appended as missing.
 func appendAs(st *store, t Type, value interface{}) {
+	// Dictionary-backed columns encode parsed string values.
+	if de, ok := (*st).(dictionaryElements); ok {
+		if v, parsed := parseStringValue(value); parsed {
+			de.encodeAppend([]string{v}, nil)
+		} else {
+			de.codes = append(de.codes, -1)
+		}
+		*st = de
+		return
+	}
 	switch t {
 	case Int:
 		col := (*st).(intElements)
@@ -268,6 +314,16 @@ func appendAs(st *store, t Type, value interface{}) {
 // setAt writes the parsed form of value at position i of the store, which
 // must hold the buffer matching t. Unparseable values mark the slot missing.
 func setAt(st *store, t Type, i int, value interface{}) {
+	// Dictionary-backed columns encode parsed string values in place.
+	if de, ok := (*st).(dictionaryElements); ok {
+		if v, parsed := parseStringValue(value); parsed {
+			de.encodeSetAt(i, v)
+		} else {
+			de.codes[i] = -1
+		}
+		*st = de
+		return
+	}
 	switch t {
 	case Int:
 		col := (*st).(intElements)

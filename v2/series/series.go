@@ -238,6 +238,17 @@ func (s Series) Empty() Series {
 // EmptyWithCapacity returns an empty Series of the same type with enough
 // capacity for callers that know the result size up front.
 func (s Series) EmptyWithCapacity(capacity int) Series {
+	if capacity < 0 {
+		capacity = 0
+	}
+	// Dictionary columns keep their dictionary when emptied.
+	if elems, ok := s.elements.(dictionaryElements); ok {
+		return Series{Name: s.Name, t: s.t, elements: dictionaryElements{
+			codes:      make([]int32, 0, capacity),
+			categories: elems.categories,
+			ordered:    elems.ordered,
+		}}
+	}
 	return Series{Name: s.Name, t: s.t, elements: emptyStore(s.t, capacity)}
 }
 
@@ -439,8 +450,49 @@ func (s Series) fillNaCopy(forward bool, limit int) Series {
 	case timeElements:
 		fillCopyRange(&col, forward, limit)
 		result.elements = col
+	case dictionaryElements:
+		fillDictionaryCodes(&col, forward, limit)
+		result.elements = col
 	}
 	return result
+}
+
+// fillDictionaryCodes forward/backward-fills missing codes (-1) in place,
+// mirroring fillCopyRange semantics for buffered columns.
+func fillDictionaryCodes(d *dictionaryElements, forward bool, limit int) {
+	if !d.storeHasNA() {
+		return
+	}
+	n := len(d.codes)
+	if forward {
+		last := int32(-1)
+		streak := 0
+		for i := 0; i < n; i++ {
+			if d.codes[i] >= 0 {
+				last = d.codes[i]
+				streak = 0
+				continue
+			}
+			streak++
+			if last >= 0 && (limit <= 0 || streak <= limit) {
+				d.codes[i] = last
+			}
+		}
+		return
+	}
+	next := int32(-1)
+	streak := 0
+	for i := n - 1; i >= 0; i-- {
+		if d.codes[i] >= 0 {
+			next = d.codes[i]
+			streak = 0
+			continue
+		}
+		streak++
+		if next >= 0 && (limit <= 0 || streak <= limit) {
+			d.codes[i] = next
+		}
+	}
 }
 
 // FillNaNForward fills NaN values with the most recent non-NaN value that

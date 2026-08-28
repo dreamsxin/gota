@@ -157,7 +157,7 @@ jobs:
       - name: latest tag has CHANGELOG entry
         shell: bash
         run: |
-          latest=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          latest=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
           if [ -z "$latest" ]; then
             echo "no version tags found" >&2
             exit 1
@@ -172,7 +172,7 @@ jobs:
       - name: latest v2 tag has CHANGELOG entry
         shell: bash
         run: |
-          latest=$(git tag -l 'v2/*' | grep -E '^v2/v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          latest=$(git tag -l 'v2/*' | grep -E '^v2/v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
           if [ -z "$latest" ]; then
             echo "no v2 version tags yet; skipping"
             exit 0

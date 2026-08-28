@@ -16,6 +16,11 @@ func (s Series) checkStringOp(op string) (stringElements, Series) {
 	if s.t != String {
 		return stringElements{}, Series{Err: fmt.Errorf("%s: requires a String series, got %s", op, s.t), Name: s.Name}
 	}
+	// Dictionary columns materialize first; string operations return plain
+	// String columns.
+	if elems, ok := s.elements.(dictionaryElements); ok {
+		return elems.toStringColumn(), Series{}
+	}
 	return s.elements.(stringElements), Series{}
 }
 

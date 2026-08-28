@@ -40,6 +40,12 @@ func (m Mask) Rows() []int { return m.m.rows() }
 // mask. It is the kernel entry point used by DataFrame filtering; Compare
 // keeps its Bool-Series signature on top of it.
 func (s Series) CompareMask(comparator Comparator, comparando interface{}) (Mask, error) {
+	// Dictionary columns compare through their string materialization;
+	// results stay semantically identical to String columns.
+	if elems, ok := s.elements.(dictionaryElements); ok {
+		mat := Series{Name: s.Name, t: String, elements: elems.toStringColumn()}
+		return mat.CompareMask(comparator, comparando)
+	}
 	n := s.Len()
 
 	if comparator == CompFunc {
@@ -420,6 +426,10 @@ func RowLess(s Series, i, j int) bool {
 		return !elems.data[i] && elems.data[j]
 	case timeElements:
 		return elems.data[i].Before(elems.data[j])
+	case dictionaryElements:
+		a, _ := elems.strAt(i)
+		b, _ := elems.strAt(j)
+		return a < b
 	}
 	return false
 }
@@ -437,6 +447,10 @@ func RowGreater(s Series, i, j int) bool {
 		return elems.data[i] && !elems.data[j]
 	case timeElements:
 		return elems.data[i].After(elems.data[j])
+	case dictionaryElements:
+		a, _ := elems.strAt(i)
+		b, _ := elems.strAt(j)
+		return a > b
 	}
 	return false
 }
@@ -518,6 +532,8 @@ func (s Series) GatherRows(idx []int) Series {
 			return gatherMasked(elems, idx)
 		case timeElements:
 			return gatherMasked(elems, idx)
+		case dictionaryElements:
+			return elems.gatherStore(idx)
 		}
 		return nil
 	}

@@ -26,9 +26,18 @@ func TestSchema_Describe(t *testing.T) {
 		t.Fatalf("Types = %v, want %v", got, want)
 	}
 	for _, f := range s.Fields() {
-		if !f.Nullable {
-			t.Fatalf("v1.x fields are always nullable: %+v", f)
+		if f.Nullable {
+			t.Fatalf("fields without missing values must be non-nullable: %+v", f)
 		}
+	}
+	// Physical DTypes mirror the column types.
+	if got, want := s.DTypes(), []series.DType{series.DTUtf8, series.DTInt64, series.DTFloat64}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("DTypes = %v, want %v", got, want)
+	}
+	// A column with missing values reports nullable.
+	withNA := New(series.New([]interface{}{1, nil}, series.Int, "x"))
+	if f, ok := withNA.Schema().Field("x"); !ok || !f.Nullable {
+		t.Fatalf("column with missing values must be nullable: %+v", f)
 	}
 
 	f, ok := s.Field("num")

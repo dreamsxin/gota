@@ -25,6 +25,15 @@ Anchored measurements (i5-12400F): Compare 100k Int 1.18 ms; Filter
 (2 AND conditions, 100k rows) 1.55 ms / 26 allocs; InnerJoin 20k×20k
 single Int key 1.73 ms; Arrange 100k×20 82 ms / 57 allocs (single
 materialization pass).
+Revised: 2026-08-28 (Milestone 3 landed) - the DType system (§4) is in
+place: physical DType singletons plus the Dictionary logical type; the
+Categorical now surfaces as dictionary-backed Series (Type() stays String,
+identity via DType()); Schema exposes Field.DType and derives Nullable from
+the data, letting kernels skip validity work on non-nullable columns.
+§9.2 landed as a lock-free chain-local ExecutionContext intern pool
+(single-chain contract - pool lock waiting is zero by construction);
+§9.3 landed as the 1.5 GiB ScanCSV byte budget with no exceptions and no
+automatic threshold adjustment.
 Scope: Series storage layout, batch kernels, DType system, and the v2.0.0
 release path. This is a design document, not a feature list; every
 performance claim below is measured on the v1 implementation by the

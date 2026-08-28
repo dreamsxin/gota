@@ -13,7 +13,10 @@ repository's `v2/` directory per Go major-version subdirectory layout (typed
 column buffers with validity bitmaps, see `docs/rfc-columnar-kernel.md`). It
 is a clean break from v1.x: the `Element`/`Elem` API and the `Rapply` family
 are removed, replaced by typed Series accessors (`Val`, `IsNA`, `Record`,
-`FloatAt`, `IntAt`, `BoolAt`, `TimeAt`) and column-wise apply.
+`FloatAt`, `IntAt`, `BoolAt`, `TimeAt`) and column-wise apply. The DType
+system (physical types plus the Dictionary logical type, with
+`ExecutionContext` chain-local interning and the 1.5 GiB batch byte budget)
+landed with Milestone 3.
 
 ## Table of Contents
 

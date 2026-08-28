@@ -12,10 +12,14 @@ type Field struct {
 	Name string
 	// Type is the physical storage type of the column.
 	Type series.Type
+	// DType is the logical kernel type (RFC §4): a physical DType for
+	// plain columns, the Dictionary DType for dictionary-encoded columns.
+	// Decimal and ordered Enum will extend this surface later.
+	DType series.DType
 	// Nullable reports whether the column may contain missing values.
-	// Every v1.x Series supports NaN, so this is always true; it exists so
-	// the columnar kernel can introduce non-nullable buffers without
-	// another API change.
+	// Schema() derives it from the actual data: columns without any
+	// missing value are non-nullable, letting kernels skip validity work
+	// entirely (nil validity bitmaps).
 	Nullable bool
 }
 
@@ -35,7 +39,12 @@ func (df DataFrame) Schema() Schema {
 	}
 	fields := make([]Field, df.ncols)
 	for i, col := range df.columns {
-		fields[i] = Field{Name: col.Name, Type: col.Type(), Nullable: true}
+		fields[i] = Field{
+			Name:     col.Name,
+			Type:     col.Type(),
+			DType:    col.DType(),
+			Nullable: col.HasNaN(),
+		}
 	}
 	return Schema{fields: fields}
 }
@@ -68,6 +77,15 @@ func (s Schema) Types() []series.Type {
 	return out
 }
 
+// DTypes returns the ordered logical kernel types.
+func (s Schema) DTypes() []series.DType {
+	out := make([]series.DType, len(s.fields))
+	for i, f := range s.fields {
+		out[i] = f.DType
+	}
+	return out
+}
+
 // Field returns the field with the given column name.
 func (s Schema) Field(name string) (Field, bool) {
 	for _, f := range s.fields {
@@ -79,17 +97,50 @@ func (s Schema) Field(name string) (Field, bool) {
 }
 
 // Equal reports whether both schemas describe the same columns in the same
-// order with the same types and nullability.
+// order with the same types and nullability. DType identity compares
+// physical layout plus, for Dictionary fields, category content.
 func (s Schema) Equal(other Schema) bool {
-	return reflect.DeepEqual(s.fields, other.fields)
+	if len(s.fields) != len(other.fields) {
+		return false
+	}
+	for i := range s.fields {
+		a, b := s.fields[i], other.fields[i]
+		if a.Name != b.Name || a.Type != b.Type || a.Nullable != b.Nullable {
+			return false
+		}
+		if !dtypeEqual(a.DType, b.DType) {
+			return false
+		}
+	}
+	return true
+}
+
+func dtypeEqual(a, b series.DType) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	if a.Physical() != b.Physical() {
+		return false
+	}
+	if a.Physical() == series.PhysDictionary {
+		ca, _ := series.DictionaryCategories(a)
+		cb, _ := series.DictionaryCategories(b)
+		return reflect.DeepEqual(ca, cb)
+	}
+	return true
 }
 
 // FromSchema returns a zero-row DataFrame conforming to the schema. It is
 // intended for output buffers and streaming accumulators whose column
-// layout is known up front.
+// layout is known up front. Dictionary fields produce empty dictionary
+// columns sharing the schema's categories.
 func FromSchema(s Schema) DataFrame {
 	cols := make([]series.Series, len(s.fields))
 	for i, f := range s.fields {
+		if cats, ok := series.DictionaryCategories(f.DType); ok {
+			cols[i] = series.EmptyDictionarySeries(cats, f.Name)
+			continue
+		}
 		cols[i] = series.New(nil, f.Type, f.Name).Empty()
 	}
 	return New(cols...)

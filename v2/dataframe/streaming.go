@@ -4,11 +4,21 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 
 	"github.com/dreamsxin/gota/v2/series"
 )
+
+// BatchByteBudget bounds the net data bytes a single ScanCSV batch may
+// accumulate before it is flushed (RFC §9.3): 1.5 GiB. Byte budgets decide
+// chunk boundaries, never row counts, and there are no exceptions or
+// automatic threshold adjustments.
+const BatchByteBudget int64 = 1610612736
+
+// batchByteBudget is the effective budget; tests swap in smaller values.
+var batchByteBudget = BatchByteBudget
 
 // ============================================================================
 // ReadCSV streaming mode
@@ -63,21 +73,15 @@ func ScanCSV(r io.Reader, batchSize int, fn func(DataFrame) error, options ...Lo
 	}
 
 	if batchSize <= 0 {
-		// Fall back to reading all at once.
-		records, err := csvReader.ReadAll()
-		if err != nil {
-			return fmt.Errorf("ScanCSV: %v", err)
-		}
-		if cfg.hasHeader {
-			records = append([][]string{header}, records...)
-		}
-		return fn(LoadRecords(records, options...))
+		// No row limit: batches are bounded by the byte budget only.
+		batchSize = math.MaxInt
 	}
 
-	batch := make([][]string, 0, batchSize+1)
+	batch := make([][]string, 0, 1024)
 	if cfg.hasHeader {
 		batch = append(batch, header)
 	}
+	var batchBytes int64
 
 	flush := func() error {
 		if len(batch) == 0 || (cfg.hasHeader && len(batch) == 1) {
@@ -100,6 +104,7 @@ func ScanCSV(r io.Reader, batchSize int, fn func(DataFrame) error, options ...Lo
 		} else {
 			batch = batch[:0]
 		}
+		batchBytes = 0
 		return nil
 	}
 
@@ -112,11 +117,14 @@ func ScanCSV(r io.Reader, batchSize int, fn func(DataFrame) error, options ...Lo
 			return fmt.Errorf("ScanCSV: %v", err)
 		}
 		batch = append(batch, row)
+		for _, cell := range row {
+			batchBytes += int64(len(cell)) + 1
+		}
 		dataRows := len(batch)
 		if cfg.hasHeader {
 			dataRows--
 		}
-		if dataRows >= batchSize {
+		if dataRows >= batchSize || batchBytes >= batchByteBudget {
 			if err := flush(); err != nil {
 				return err
 			}
