@@ -20,7 +20,7 @@ func (s Series) Factorize() (labels []string, codes []int, counts []int, ok bool
 }
 
 // FactorizePair encodes two Series into dense tuple group codes in first-seen
-// order. It covers common typed key pairs without per-row Element dispatch.
+// order. It covers common typed key pairs without per-row dispatch.
 func FactorizePair(left, right Series) (labels []string, codes []int, counts []int, ok bool) {
 	if left.Len() != right.Len() {
 		return nil, nil, nil, false
@@ -69,10 +69,11 @@ type intIntKey struct {
 func factorizeStringStringPair(left, right stringElements) ([]string, []int, []int, bool) {
 	groupIDs := make(map[stringStringKey]int)
 	labels := make([]string, 0)
-	codes := make([]int, len(left))
+	codes := make([]int, len(left.data))
 	counts := make([]int, 0)
-	for row := range left {
-		key := stringStringKey{left: left[row].e, right: right[row].e, leftNA: left[row].IsNA(), rightNA: right[row].IsNA()}
+	for row := range left.data {
+		leftNA, rightNA := !left.isValid(row), !right.isValid(row)
+		key := stringStringKey{left: left.data[row], right: right.data[row], leftNA: leftNA, rightNA: rightNA}
 		groupID, ok := groupIDs[key]
 		if !ok {
 			groupID = len(labels)
@@ -90,10 +91,11 @@ func factorizeStringStringPair(left, right stringElements) ([]string, []int, []i
 func factorizeStringIntPair(left stringElements, right intElements) ([]string, []int, []int, bool) {
 	groupIDs := make(map[stringIntKey]int)
 	labels := make([]string, 0)
-	codes := make([]int, len(left))
+	codes := make([]int, len(left.data))
 	counts := make([]int, 0)
-	for row := range left {
-		key := stringIntKey{left: left[row].e, right: right[row].e, leftNA: left[row].IsNA(), rightNA: right[row].IsNA()}
+	for row := range left.data {
+		leftNA, rightNA := !left.isValid(row), !right.isValid(row)
+		key := stringIntKey{left: left.data[row], right: right.data[row], leftNA: leftNA, rightNA: rightNA}
 		groupID, ok := groupIDs[key]
 		if !ok {
 			groupID = len(labels)
@@ -111,10 +113,11 @@ func factorizeStringIntPair(left stringElements, right intElements) ([]string, [
 func factorizeIntStringPair(left intElements, right stringElements) ([]string, []int, []int, bool) {
 	groupIDs := make(map[intStringKey]int)
 	labels := make([]string, 0)
-	codes := make([]int, len(left))
+	codes := make([]int, len(left.data))
 	counts := make([]int, 0)
-	for row := range left {
-		key := intStringKey{left: left[row].e, right: right[row].e, leftNA: left[row].IsNA(), rightNA: right[row].IsNA()}
+	for row := range left.data {
+		leftNA, rightNA := !left.isValid(row), !right.isValid(row)
+		key := intStringKey{left: left.data[row], right: right.data[row], leftNA: leftNA, rightNA: rightNA}
 		groupID, ok := groupIDs[key]
 		if !ok {
 			groupID = len(labels)
@@ -132,10 +135,11 @@ func factorizeIntStringPair(left intElements, right stringElements) ([]string, [
 func factorizeIntIntPair(left, right intElements) ([]string, []int, []int, bool) {
 	groupIDs := make(map[intIntKey]int)
 	labels := make([]string, 0)
-	codes := make([]int, len(left))
+	codes := make([]int, len(left.data))
 	counts := make([]int, 0)
-	for row := range left {
-		key := intIntKey{left: left[row].e, right: right[row].e, leftNA: left[row].IsNA(), rightNA: right[row].IsNA()}
+	for row := range left.data {
+		leftNA, rightNA := !left.isValid(row), !right.isValid(row)
+		key := intIntKey{left: left.data[row], right: right.data[row], leftNA: leftNA, rightNA: rightNA}
 		groupID, ok := groupIDs[key]
 		if !ok {
 			groupID = len(labels)
@@ -171,12 +175,12 @@ func intLabel(value int64, isNA bool) string {
 func factorizeStringElements(elems stringElements) ([]string, []int, []int, bool) {
 	groupIDs := make(map[string]int)
 	labels := make([]string, 0)
-	codes := make([]int, len(elems))
+	codes := make([]int, len(elems.data))
 	counts := make([]int, 0)
-	for row, elem := range elems {
+	for row := range elems.data {
 		key := "<nil>"
-		if !elem.IsNA() {
-			key = elem.e
+		if elems.isValid(row) {
+			key = elems.data[row]
 		}
 		groupID, ok := groupIDs[key]
 		if !ok {
@@ -194,12 +198,12 @@ func factorizeStringElements(elems stringElements) ([]string, []int, []int, bool
 func factorizeIntElements(elems intElements) ([]string, []int, []int, bool) {
 	groupIDs := make(map[int64]int)
 	labels := make([]string, 0)
-	codes := make([]int, len(elems))
+	codes := make([]int, len(elems.data))
 	counts := make([]int, 0)
 	naGroup := -1
-	for row, elem := range elems {
+	for row := range elems.data {
 		var groupID int
-		if elem.IsNA() {
+		if !elems.isValid(row) {
 			if naGroup == -1 {
 				naGroup = len(labels)
 				labels = append(labels, "<nil>")
@@ -207,7 +211,7 @@ func factorizeIntElements(elems intElements) ([]string, []int, []int, bool) {
 			}
 			groupID = naGroup
 		} else {
-			key := elem.e
+			key := elems.data[row]
 			var ok bool
 			groupID, ok = groupIDs[key]
 			if !ok {
@@ -226,12 +230,12 @@ func factorizeIntElements(elems intElements) ([]string, []int, []int, bool) {
 func factorizeBoolElements(elems boolElements) ([]string, []int, []int, bool) {
 	groupIDs := make(map[bool]int, 2)
 	labels := make([]string, 0, 3)
-	codes := make([]int, len(elems))
+	codes := make([]int, len(elems.data))
 	counts := make([]int, 0, 3)
 	naGroup := -1
-	for row, elem := range elems {
+	for row := range elems.data {
 		var groupID int
-		if elem.IsNA() {
+		if !elems.isValid(row) {
 			if naGroup == -1 {
 				naGroup = len(labels)
 				labels = append(labels, "<nil>")
@@ -239,7 +243,7 @@ func factorizeBoolElements(elems boolElements) ([]string, []int, []int, bool) {
 			}
 			groupID = naGroup
 		} else {
-			key := elem.e
+			key := elems.data[row]
 			var ok bool
 			groupID, ok = groupIDs[key]
 			if !ok {
@@ -258,12 +262,12 @@ func factorizeBoolElements(elems boolElements) ([]string, []int, []int, bool) {
 func factorizeFloatElements(elems floatElements) ([]string, []int, []int, bool) {
 	groupIDs := make(map[float64]int)
 	labels := make([]string, 0)
-	codes := make([]int, len(elems))
+	codes := make([]int, len(elems.data))
 	counts := make([]int, 0)
 	naGroup := -1
-	for row, elem := range elems {
+	for row := range elems.data {
 		var groupID int
-		if elem.IsNA() {
+		if !elems.isValid(row) {
 			if naGroup == -1 {
 				naGroup = len(labels)
 				labels = append(labels, "<nil>")
@@ -271,7 +275,7 @@ func factorizeFloatElements(elems floatElements) ([]string, []int, []int, bool) 
 			}
 			groupID = naGroup
 		} else {
-			key := elem.e
+			key := elems.data[row]
 			var ok bool
 			groupID, ok = groupIDs[key]
 			if !ok {

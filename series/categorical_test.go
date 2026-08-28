@@ -45,8 +45,8 @@ func TestCategorical_ToSeries(t *testing.T) {
 	if s.Len() != 3 {
 		t.Fatalf("ToSeries len: got %d want 3", s.Len())
 	}
-	if s.Elem(0).String() != "x" {
-		t.Errorf("ToSeries[0]: got %q want x", s.Elem(0).String())
+	if s.Record(0) != "x" {
+		t.Errorf("ToSeries[0]: got %q want x", s.Record(0))
 	}
 }
 

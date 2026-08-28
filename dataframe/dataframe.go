@@ -600,43 +600,43 @@ func buildGroupFirstRows(groupCodes []int, nGroups int) []int {
 
 func buildGroupKey(cols []series.Series, keyIdxs []int, row int) string {
 	if len(keyIdxs) == 1 {
-		return groupKeyPart(cols[keyIdxs[0]].Elem(row))
+		return groupKeyPart(cols[keyIdxs[0]], row)
 	}
 	var sb strings.Builder
 	for i, idx := range keyIdxs {
 		if i > 0 {
 			sb.WriteByte('_')
 		}
-		sb.WriteString(groupKeyPart(cols[idx].Elem(row)))
+		sb.WriteString(groupKeyPart(cols[idx], row))
 	}
 	return sb.String()
 }
 
-func groupKeyPart(elem series.Element) string {
-	if elem.IsNA() {
+func groupKeyPart(s series.Series, row int) string {
+	if s.IsNA(row) {
 		return "<nil>"
 	}
-	switch elem.Type() {
+	switch s.Type() {
 	case series.String:
-		return elem.String()
+		return s.Record(row)
 	case series.Time:
-		return fmt.Sprint(elem.Val())
+		return fmt.Sprint(s.Val(row))
 	case series.Int:
-		v, err := elem.Int64()
+		v, err := s.Int64At(row)
 		if err != nil {
 			return "<nil>"
 		}
 		return strconv.FormatInt(v, 10)
 	case series.Float:
-		return strconv.FormatFloat(elem.Float(), 'f', -1, 64)
+		return strconv.FormatFloat(s.FloatAt(row), 'f', -1, 64)
 	case series.Bool:
-		v, err := elem.Bool()
+		v, err := s.BoolAt(row)
 		if err != nil {
 			return "<nil>"
 		}
 		return strconv.FormatBool(v)
 	default:
-		return fmt.Sprint(elem.Val())
+		return fmt.Sprint(s.Val(row))
 	}
 }
 
@@ -1044,7 +1044,7 @@ func (gps Groups) AggregationParallel(typs []AggregationType, colnames []string)
 			continue
 		}
 		for outIdx, srcIdx := range gps.keyIdxs {
-			columns[outIdx].Append(gps.source.columns[srcIdx].Elem(firstRow))
+			columns[outIdx].AppendValueFrom(gps.source.columns[srcIdx], firstRow)
 		}
 		for i := range colnames {
 			columns[len(gps.keyIdxs)+i].Append(values[i][groupIdx])
@@ -1142,7 +1142,7 @@ func (gps Groups) Transform(colname string, f func(series.Series) series.Series)
 			err := fmt.Errorf("unknown column name")
 			return series.Series{Err: err}, err
 		}
-		values := make([]series.Element, gps.nrows)
+		values := make([]interface{}, gps.nrows)
 		outType := gps.source.columns[srcIdx].Type()
 		typeSet := false
 		groupRows := gps.ensureGroupRows()
@@ -1158,11 +1158,11 @@ func (gps Groups) Transform(colname string, f func(series.Series) series.Series)
 				return series.Series{Err: err}, err
 			}
 			if transformed.Len() > 0 && !typeSet {
-				outType = transformed.Elem(0).Type()
+				outType = transformed.Type()
 				typeSet = true
 			}
 			for i, row := range rows {
-				values[row] = transformed.Elem(i)
+				values[row] = transformed.Val(i)
 			}
 		}
 		out := series.New(nil, outType, colname).EmptyWithCapacity(gps.nrows)
@@ -1545,244 +1545,6 @@ func (df DataFrame) CapplyParallel(f func(series.Series) series.Series) DataFram
 		columns[r.idx] = r.s
 	}
 	return New(columns...)
-}
-
-// Rapply applies the given function to the rows of a DataFrame. Prior to applying
-// the function the elements of each row are cast to a Series of a specific
-// type. In order of priority: String -> Float -> Int -> Bool. This casting also
-// takes place after the function application to equalize the type of the columns.
-func (df DataFrame) Rapply(f func(series.Series) series.Series) DataFrame {
-	if df.Err != nil {
-		return df
-	}
-
-	detectType := func(types []series.Type) (series.Type, error) {
-		var hasStrings, hasFloats, hasInts, hasBools bool
-		for _, t := range types {
-			switch t {
-			case series.String:
-				hasStrings = true
-			case series.Float:
-				hasFloats = true
-			case series.Int:
-				hasInts = true
-			case series.Bool:
-				hasBools = true
-			}
-		}
-		switch {
-		case hasStrings:
-			return series.String, nil
-		case hasBools:
-			return series.Bool, nil
-		case hasFloats:
-			return series.Float, nil
-		case hasInts:
-			return series.Int, nil
-		default:
-			return series.String, fmt.Errorf("type not supported")
-		}
-	}
-
-	// Detect row type prior to function application
-	types := df.Types()
-	rowType, err := detectType(types)
-	if err != nil {
-		return DataFrame{Err: fmt.Errorf("Rapply: %v", err)}
-	}
-
-	// Create Element matrix
-	elements := make([][]series.Element, df.nrows)
-	rowlen := -1
-	for i := 0; i < df.nrows; i++ {
-		row := series.New(nil, rowType, "").EmptyWithCapacity(df.ncols)
-		for _, col := range df.columns {
-			row.Append(col.Elem(i))
-		}
-		row = f(row)
-		if row.Err != nil {
-			return DataFrame{Err: fmt.Errorf("error applying function on row %d: %v", i, row.Err)}
-		}
-
-		if rowlen != -1 && rowlen != row.Len() {
-			return DataFrame{Err: withSentinel("error applying function: rows have different lengths", ErrLengthMismatch)}
-		}
-		rowlen = row.Len()
-
-		rowElems := make([]series.Element, rowlen)
-		for j := 0; j < rowlen; j++ {
-			rowElems[j] = row.Elem(j)
-		}
-		elements[i] = rowElems
-	}
-
-	// Cast columns if necessary
-	columns := make([]series.Series, rowlen)
-	for j := 0; j < rowlen; j++ {
-		types := make([]series.Type, df.nrows)
-		for i := 0; i < df.nrows; i++ {
-			types[i] = elements[i][j].Type()
-		}
-		colType, err := detectType(types)
-		if err != nil {
-			return DataFrame{Err: fmt.Errorf("Rapply: %v", err)}
-		}
-		s := series.New(nil, colType, "").EmptyWithCapacity(df.nrows)
-		for i := 0; i < df.nrows; i++ {
-			s.Append(elements[i][j])
-		}
-		columns[j] = s
-	}
-
-	nrows, ncols, err := checkColumnsDimensions(columns...)
-	if err != nil {
-		return DataFrame{Err: err}
-	}
-	df = DataFrame{
-		columns: columns,
-		ncols:   ncols,
-		nrows:   nrows,
-	}
-	colnames := df.Names()
-	fixColnames(colnames)
-	for i, colname := range colnames {
-		df.columns[i].Name = colname
-	}
-	return df
-}
-
-// RapplyParallel applies f to each row concurrently using up to GOMAXPROCS
-// goroutines. Row order is preserved. f must be safe to call concurrently.
-func (df DataFrame) RapplyParallel(f func(series.Series) series.Series) DataFrame {
-	if df.Err != nil {
-		return df
-	}
-
-	detectType := func(types []series.Type) series.Type {
-		var hasStrings, hasFloats, hasInts, hasBools bool
-		for _, t := range types {
-			switch t {
-			case series.String:
-				hasStrings = true
-			case series.Float:
-				hasFloats = true
-			case series.Int:
-				hasInts = true
-			case series.Bool:
-				hasBools = true
-			}
-		}
-		switch {
-		case hasStrings:
-			return series.String
-		case hasBools:
-			return series.Bool
-		case hasFloats:
-			return series.Float
-		case hasInts:
-			return series.Int
-		default:
-			return series.String
-		}
-	}
-
-	types := df.Types()
-	rowType := detectType(types)
-
-	// Pool of empty Series to reduce per-goroutine allocations.
-	rowPool := &sync.Pool{
-		New: func() interface{} {
-			s := series.New(nil, rowType, "").EmptyWithCapacity(df.ncols)
-			return &s
-		},
-	}
-
-	type rowResult struct {
-		idx   int
-		elems []series.Element
-		err   error
-	}
-
-	ch := make(chan rowResult, df.nrows)
-	sem := make(chan struct{}, numWorkers())
-	var wg sync.WaitGroup
-
-	for i := 0; i < df.nrows; i++ {
-		wg.Add(1)
-		go func(rowIdx int) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			// Reuse a pooled Series as the scratch row buffer.
-			rowPtr := rowPool.Get().(*series.Series)
-			row := *rowPtr
-			// Reset to empty before reuse.
-			row = row.EmptyWithCapacity(df.ncols)
-			for _, col := range df.columns {
-				row.Append(col.Elem(rowIdx))
-			}
-			row = f(row)
-			if row.Err != nil {
-				rowPool.Put(rowPtr)
-				ch <- rowResult{idx: rowIdx, err: row.Err}
-				return
-			}
-			elems := make([]series.Element, row.Len())
-			for j := 0; j < row.Len(); j++ {
-				elems[j] = row.Elem(j)
-			}
-			// Return a fresh empty series to the pool.
-			empty := row.EmptyWithCapacity(df.ncols)
-			*rowPtr = empty
-			rowPool.Put(rowPtr)
-			ch <- rowResult{idx: rowIdx, elems: elems}
-		}(i)
-	}
-	go func() { wg.Wait(); close(ch) }()
-
-	elements := make([][]series.Element, df.nrows)
-	rowlen := -1
-	for r := range ch {
-		if r.err != nil {
-			return DataFrame{Err: fmt.Errorf("RapplyParallel row %d: %v", r.idx, r.err)}
-		}
-		if rowlen == -1 {
-			rowlen = len(r.elems)
-		} else if rowlen != len(r.elems) {
-			return DataFrame{Err: withSentinel("RapplyParallel: rows have different lengths", ErrLengthMismatch)}
-		}
-		elements[r.idx] = r.elems
-	}
-	if rowlen <= 0 {
-		return df.Copy()
-	}
-
-	columns := make([]series.Series, rowlen)
-	for j := 0; j < rowlen; j++ {
-		colTypes := make([]series.Type, df.nrows)
-		for i := 0; i < df.nrows; i++ {
-			colTypes[i] = elements[i][j].Type()
-		}
-		colType := detectType(colTypes)
-		s := series.New(nil, colType, "").EmptyWithCapacity(df.nrows)
-		for i := 0; i < df.nrows; i++ {
-			s.Append(elements[i][j])
-		}
-		columns[j] = s
-	}
-
-	nrows, ncols, err := checkColumnsDimensions(columns...)
-	if err != nil {
-		return DataFrame{Err: err}
-	}
-	result := DataFrame{columns: columns, ncols: ncols, nrows: nrows}
-	colnames := result.Names()
-	fixColnames(colnames)
-	for i, colname := range colnames {
-		result.columns[i].Name = colname
-	}
-	return result
 }
 
 // LoadOption is the type used to configure the load of elements
@@ -2617,7 +2379,7 @@ func (df DataFrame) Ncol() int {
 }
 
 func (df DataFrame) At(i, j int) float64 {
-	return df.Elem(i, j).Float()
+	return df.columns[j].FloatAt(i)
 }
 
 func (df DataFrame) T() mat.Matrix {
@@ -2685,7 +2447,7 @@ func (df DataFrame) Duplicated(subset ...string) []bool {
 			if c > 0 {
 				sb.WriteByte('|')
 			}
-			sb.WriteString(df.columns[ci].Elem(i).String())
+			sb.WriteString(df.columns[ci].Record(i))
 		}
 		key := sb.String()
 		if _, ok := seen[key]; ok {
@@ -2756,7 +2518,7 @@ func (df DataFrame) DropNA(how NAHow, subset ...string) DataFrame {
 	for i := 0; i < df.nrows; i++ {
 		nanCount := 0
 		for _, ci := range colIdxs {
-			if df.columns[ci].Elem(i).IsNA() {
+			if df.columns[ci].IsNA(i) {
 				nanCount++
 			}
 		}
@@ -3150,7 +2912,7 @@ func (df DataFrame) Melt(idVars []string, valueVars []string, varName, valueName
 		elems := make([]interface{}, totalRows)
 		for i := 0; i < nrows; i++ {
 			for j := 0; j < nval; j++ {
-				elems[i*nval+j] = src.Elem(i).Val()
+				elems[i*nval+j] = src.Val(i)
 			}
 		}
 		outCols[k] = series.New(elems, src.Type(), idName)
@@ -3170,7 +2932,7 @@ func (df DataFrame) Melt(idVars []string, valueVars []string, varName, valueName
 	valElems := make([]interface{}, totalRows)
 	for i := 0; i < nrows; i++ {
 		for j, vn := range valueVars {
-			valElems[i*nval+j] = df.Col(vn).Elem(i).Val()
+			valElems[i*nval+j] = df.Col(vn).Val(i)
 		}
 	}
 	// Detect type: if all value columns are numeric, use Float; otherwise String.
@@ -3337,13 +3099,11 @@ func (df DataFrame) CrossJoin(b DataFrame) DataFrame {
 	for i := 0; i < df.nrows; i++ {
 		for j := 0; j < b.nrows; j++ {
 			for ii := 0; ii < df.ncols; ii++ {
-				elem := aCols[ii].Elem(i)
-				newCols[ii].Append(elem)
+				newCols[ii].AppendValueFrom(aCols[ii], i)
 			}
 			for ii := 0; ii < b.ncols; ii++ {
 				jj := ii + df.ncols
-				elem := bCols[ii].Elem(j)
-				newCols[jj].Append(elem)
+				newCols[jj].AppendValueFrom(bCols[ii], j)
 			}
 		}
 	}
@@ -3412,10 +3172,28 @@ func (df DataFrame) GetRow(r int, funcs ...func(series.Type, interface{}) interf
 	return
 }
 
-// Elem returns the element on row `r` and column `c`. Will panic if the index is
-// out of bounds.
-func (df DataFrame) Elem(r, c int) series.Element {
-	return df.columns[c].Elem(r)
+// CellVal returns the value on row `r` and column `c`, or nil when the cell
+// is missing. Will panic if the index is out of bounds.
+func (df DataFrame) CellVal(r, c int) interface{} {
+	return df.columns[c].Val(r)
+}
+
+// CellNA reports whether the cell on row `r` and column `c` is missing. Will
+// panic if the index is out of bounds.
+func (df DataFrame) CellNA(r, c int) bool {
+	return df.columns[c].IsNA(r)
+}
+
+// CellRecord returns the string representation of the cell on row `r` and
+// column `c`; missing cells render as "NaN".
+func (df DataFrame) CellRecord(r, c int) string {
+	return df.columns[c].Record(r)
+}
+
+// CellBool returns the cell on row `r` and column `c` as bool, matching the
+// strict conversion rules.
+func (df DataFrame) CellBool(r, c int) (bool, error) {
+	return df.columns[c].BoolAt(r)
 }
 
 // fixColnames assigns a name to the missing column names and makes it so that the
@@ -3568,10 +3346,9 @@ func (df DataFrame) Describe() DataFrame {
 		nonNull := 0
 		seen := make(map[string]struct{}, col.Len())
 		for i := 0; i < col.Len(); i++ {
-			e := col.Elem(i)
-			if !e.IsNA() {
+			if !col.IsNA(i) {
 				nonNull++
-				seen[e.String()] = struct{}{}
+				seen[col.Record(i)] = struct{}{}
 			}
 		}
 		nunique := len(seen)
@@ -3617,15 +3394,15 @@ func (df DataFrame) Describe() DataFrame {
 			// Show min and max timestamps; other stats are not applicable.
 			minStr, maxStr := "-", "-"
 			for i := 0; i < col.Len(); i++ {
-				e := col.Elem(i)
-				if e.IsNA() {
+				if col.IsNA(i) {
 					continue
 				}
-				if minStr == "-" || e.String() < minStr {
-					minStr = e.String()
+				r := col.Record(i)
+				if minStr == "-" || r < minStr {
+					minStr = r
 				}
-				if maxStr == "-" || e.String() > maxStr {
-					maxStr = e.String()
+				if maxStr == "-" || r > maxStr {
+					maxStr = r
 				}
 			}
 			newCol = series.New(
@@ -3683,18 +3460,18 @@ func (df DataFrame) Pivot(rows []string, columns []string, values []PivotValue) 
 
 		// fill row
 		for colIdx, colname := range rows {
-			newColElements[colIdx][rowIdx] = rowGroupDF.Col(colname).Elem(0)
+			newColElements[colIdx][rowIdx] = rowGroupDF.Col(colname).Val(0)
 		}
 		// set default value for columns
 		for colIdx := range generatedColnames {
-			newColElements[colIdx+len(rows)][rowIdx] = getDefaultElem(generatedColtyps[colIdx])
+			newColElements[colIdx+len(rows)][rowIdx] = getDefaultVal(generatedColtyps[colIdx])
 		}
 
 		// update value of columns
 		for i := 0; i < rowGroupDF.Nrow(); i++ {
 			colNames := make([]string, 0, len(columns))
 			for _, col := range columns {
-				colNames = append(colNames, rowGroupDF.Col(col).Elem(i).String())
+				colNames = append(colNames, rowGroupDF.Col(col).Record(i))
 			}
 
 			for _, valueColumn := range values {
@@ -3702,7 +3479,7 @@ func (df DataFrame) Pivot(rows []string, columns []string, values []PivotValue) 
 				newColNames := append(colNames, aggregatedColname)
 				newColname := strings.Join(newColNames, "_")
 				colIdx := strIndexInStrSlice(generatedColnames, newColname)
-				newColElements[len(rows)+colIdx][rowIdx] = rowGroupDF.Col(aggregatedColname).Elem(i)
+				newColElements[len(rows)+colIdx][rowIdx] = rowGroupDF.Col(aggregatedColname).Val(i)
 			}
 		}
 		rowIdx++
@@ -3816,11 +3593,11 @@ func (df DataFrame) buildGeneratedCols(aggregatedDF DataFrame, columns []string,
 	}
 
 	columnGroups := aggregatedDF.GroupBy(columns...).GetGroups()
-	generatedColElemsList := make([][]series.Element, 0, len(columnGroups))
+	generatedColElemsList := make([][]interface{}, 0, len(columnGroups))
 	for _, columnGroupDf := range columnGroups {
-		columnElems := make([]series.Element, 0, len(columns))
+		columnElems := make([]interface{}, 0, len(columns))
 		for _, column := range columns {
-			columnElems = append(columnElems, columnGroupDf.Col(column).Elem(0))
+			columnElems = append(columnElems, columnGroupDf.Col(column).Val(0))
 		}
 		generatedColElemsList = append(generatedColElemsList, columnElems)
 	}
@@ -3831,9 +3608,9 @@ func (df DataFrame) buildGeneratedCols(aggregatedDF DataFrame, columns []string,
 		generatedColElemsJ := generatedColElemsList[j]
 
 		for idx := range generatedColElemsI {
-			if generatedColElemsI[idx].Less(generatedColElemsJ[idx]) {
+			if valueLess(generatedColElemsI[idx], generatedColElemsJ[idx]) {
 				return true
-			} else if generatedColElemsI[idx].Greater(generatedColElemsJ[idx]) {
+			} else if valueGreater(generatedColElemsI[idx], generatedColElemsJ[idx]) {
 				return false
 			} else {
 				continue
@@ -3848,7 +3625,7 @@ func (df DataFrame) buildGeneratedCols(aggregatedDF DataFrame, columns []string,
 	for _, generatedColElems := range generatedColElemsList {
 		tmpColnames := make([]string, 0, len(generatedColElems))
 		for _, elem := range generatedColElems {
-			tmpColnames = append(tmpColnames, elem.String())
+			tmpColnames = append(tmpColnames, valueString(elem))
 		}
 		for _, value := range values {
 			aggregatedValueColname := buildAggregatedColname(value.Colname, value.AggregationType)
@@ -3860,7 +3637,7 @@ func (df DataFrame) buildGeneratedCols(aggregatedDF DataFrame, columns []string,
 	return generatedColnames, generatedColtyps
 }
 
-func (df DataFrame) buildNewCols(rows []string, generatedColnames []string, rowCnt int) ([]string, [][]series.Element) {
+func (df DataFrame) buildNewCols(rows []string, generatedColnames []string, rowCnt int) ([]string, [][]interface{}) {
 	newColnames := make([]string, 0, len(rows)+len(generatedColnames))
 	if len(rows) > 0 {
 		newColnames = append(newColnames, rows...)
@@ -3869,9 +3646,9 @@ func (df DataFrame) buildNewCols(rows []string, generatedColnames []string, rowC
 		newColnames = append(newColnames, generatedColnames...)
 	}
 
-	newColElements := make([][]series.Element, len(newColnames))
+	newColElements := make([][]interface{}, len(newColnames))
 	for i := range newColElements {
-		newColElements[i] = make([]series.Element, rowCnt)
+		newColElements[i] = make([]interface{}, rowCnt)
 	}
 	return newColnames, newColElements
 }

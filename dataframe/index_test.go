@@ -265,7 +265,7 @@ func TestIndexedDataFrame_ResetIndex(t *testing.T) {
 		t.Error("ResetIndex: column 'val' not found")
 	}
 	// First label should be "a".
-	if v := out.Col("row").Elem(0).String(); v != "a" {
+	if v := out.Col("row").Record(0); v != "a" {
 		t.Errorf("ResetIndex row[0]: got %q want %q", v, "a")
 	}
 }

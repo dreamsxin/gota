@@ -109,7 +109,7 @@ func TestScanCSV_BatchDataIntegrity(t *testing.T) {
 	var results []string
 	err := ScanCSV(strings.NewReader(csv), 2, func(batch DataFrame) error {
 		for i := 0; i < batch.Nrow(); i++ {
-			results = append(results, batch.Col("id").Elem(i).String())
+			results = append(results, batch.Col("id").Record(i))
 		}
 		return nil
 	})

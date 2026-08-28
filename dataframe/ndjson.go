@@ -62,22 +62,22 @@ func (df DataFrame) WriteNDJSON(w io.Writer) error {
 	for i := 0; i < df.nrows; i++ {
 		obj := make(map[string]interface{}, df.ncols)
 		for j, name := range names {
-			elem := df.columns[j].Elem(i)
-			if elem.IsNA() {
+			col := df.columns[j]
+			if col.IsNA(i) {
 				obj[name] = nil
 				continue
 			}
 			switch types[j] {
 			case series.Int:
-				v, _ := elem.Int()
+				v, _ := col.IntAt(i)
 				obj[name] = v
 			case series.Float:
-				obj[name] = elem.Float()
+				obj[name] = col.FloatAt(i)
 			case series.Bool:
-				v, _ := elem.Bool()
+				v, _ := col.BoolAt(i)
 				obj[name] = v
 			default:
-				obj[name] = elem.String()
+				obj[name] = col.Record(i)
 			}
 		}
 		if err := enc.Encode(obj); err != nil {

@@ -174,7 +174,7 @@ func parquetRowsFromDataFrame(df DataFrame, start, end int) ([]map[string]interf
 	for row := start; row < end; row++ {
 		out := make(map[string]interface{}, df.Ncol())
 		for _, col := range df.columns {
-			value, err := parquetValueFromElement(col, row)
+			value, err := parquetValueAt(col, row)
 			if err != nil {
 				return nil, err
 			}
@@ -185,36 +185,35 @@ func parquetRowsFromDataFrame(df DataFrame, start, end int) ([]map[string]interf
 	return rows, nil
 }
 
-func parquetValueFromElement(col series.Series, row int) (interface{}, error) {
-	elem := col.Elem(row)
-	if elem.IsNA() {
+func parquetValueAt(col series.Series, row int) (interface{}, error) {
+	if col.IsNA(row) {
 		return nil, nil
 	}
 	switch col.Type() {
 	case series.Int:
-		v, err := elem.Int()
+		v, err := col.IntAt(row)
 		if err != nil {
 			return nil, fmt.Errorf("WriteParquet: column %q row %d: %v", col.Name, row, err)
 		}
 		value := int64(v)
 		return &value, nil
 	case series.Float:
-		value := elem.Float()
+		value := col.FloatAt(row)
 		return &value, nil
 	case series.Bool:
-		v, err := elem.Bool()
+		v, err := col.BoolAt(row)
 		if err != nil {
 			return nil, fmt.Errorf("WriteParquet: column %q row %d: %v", col.Name, row, err)
 		}
 		return &v, nil
 	case series.Time:
-		v, err := elem.Time()
+		v, err := col.TimeAt(row)
 		if err != nil {
 			return nil, fmt.Errorf("WriteParquet: column %q row %d: %v", col.Name, row, err)
 		}
 		return &v, nil
 	default:
-		value := elem.String()
+		value := col.Record(row)
 		return &value, nil
 	}
 }

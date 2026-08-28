@@ -68,13 +68,13 @@ func CategoricalFromSeries(s Series) (Categorical, error) {
 	if s.Type() != String {
 		return Categorical{}, fmt.Errorf("CategoricalFromSeries: expected String series, got %v", s.Type())
 	}
+	elems := s.elements.(stringElements)
 	vals := make([]string, s.Len())
 	for i := 0; i < s.Len(); i++ {
-		e := s.Elem(i)
-		if e.IsNA() {
+		if !elems.isValid(i) {
 			vals[i] = ""
 		} else {
-			vals[i] = e.String()
+			vals[i] = elems.data[i]
 		}
 	}
 	return NewCategorical(vals, s.Name), nil

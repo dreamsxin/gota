@@ -24,19 +24,15 @@ import (
 //}
 
 // Check that all the types on a Series are the same type and that it matches with
-// Series.t
+// Series.t. Column buffers are single-typed by construction, so the check
+// reduces to validating the declared type is known.
 func checkTypes(s Series) error {
-	var types []Type
-	for i := 0; i < s.Len(); i++ {
-		e := s.elements.Elem(i)
-		types = append(types, e.Type())
+	switch s.t {
+	case String, Int, Float, Bool, Time:
+		return nil
+	default:
+		return fmt.Errorf("bad types for %v Series", s.t)
 	}
-	for _, t := range types {
-		if t != s.t {
-			return fmt.Errorf("bad types for %v Series:\n%v", s.t, types)
-		}
-	}
-	return nil
 }
 
 // compareFloats compares floating point values up to the number of digits specified.
@@ -432,9 +428,9 @@ func TestSeries_Compare_CompFunc(t *testing.T) {
 		{
 			Strings([]string{"A", "B", "C", "B", "D", "BADA"}),
 			CompFunc,
-			func(el Element) bool {
-				if el.Type() == String {
-					if val, ok := el.Val().(string); ok {
+			func(s Series, i int) bool {
+				if s.Type() == String {
+					if val, ok := s.Val(i).(string); ok {
 						return strings.HasPrefix(val, "B")
 					}
 					return false
@@ -447,7 +443,7 @@ func TestSeries_Compare_CompFunc(t *testing.T) {
 		{
 			Strings([]string{"A", "B", "C", "B", "D", "BADA"}),
 			CompFunc,
-			func(el Element) {},
+			func(s Series, i int) {},
 			Bools([]bool{false, false, false, false, false}),
 			true,
 		},
@@ -1617,139 +1613,6 @@ func TestSeries_Quantile(t *testing.T) {
 	}
 }
 
-func TestSeries_Map(t *testing.T) {
-	tests := []struct {
-		series   Series
-		expected Series
-	}{
-		{
-			Bools([]bool{false, true, false, false, true}),
-			Bools([]bool{false, true, false, false, true}),
-		},
-		{
-			Floats([]float64{1.5, -3.23, -0.337397, -0.380079, 1.60979, 34.}),
-			Floats([]float64{3, -6.46, -0.674794, -0.760158, 3.21958, 68.}),
-		},
-		{
-			Floats([]float64{math.Pi, math.Phi, math.SqrtE, math.Cbrt(64)}),
-			Floats([]float64{2 * math.Pi, 2 * math.Phi, 2 * math.SqrtE, 2 * math.Cbrt(64)}),
-		},
-		{
-			Strings([]string{"XyZApple", "XyZBanana", "XyZCitrus", "XyZDragonfruit"}),
-			Strings([]string{"Apple", "Banana", "Citrus", "Dragonfruit"}),
-		},
-		{
-			Strings([]string{"San Francisco", "XyZTokyo", "MoscowXyZ", "XyzSydney"}),
-			Strings([]string{"San Francisco", "Tokyo", "MoscowXyZ", "XyzSydney"}),
-		},
-		{
-			Ints([]int{23, 13, 101, -64, -3}),
-			Ints([]int{28, 18, 106, -59, 2}),
-		},
-		{
-			Ints([]string{"morning", "noon", "afternoon", "evening", "night"}),
-			Ints([]int{5, 5, 5, 5, 5}),
-		},
-	}
-
-	doubleFloat64 := func(e Element) Element {
-		result := e.Copy()
-		result.Set(result.Float() * 2)
-		return Element(result)
-	}
-
-	// and two booleans
-	and := func(e Element) Element {
-		result := e.Copy()
-		b, err := result.Bool()
-		if err != nil {
-			t.Errorf("%v", err)
-			return Element(nil)
-		}
-		result.Set(b && true)
-		return Element(result)
-	}
-
-	// add constant (+5) to value (v)
-	add5Int := func(e Element) Element {
-		result := e.Copy()
-		i, err := result.Int()
-		if err != nil {
-			return Element(&intElement{
-				e:   +5,
-				nan: false,
-			})
-		}
-		result.Set(i + 5)
-		return Element(result)
-	}
-
-	// trim (XyZ) prefix from string
-	trimXyZPrefix := func(e Element) Element {
-		result := e.Copy()
-		result.Set(strings.TrimPrefix(result.String(), "XyZ"))
-		return Element(result)
-	}
-
-	for testnum, test := range tests {
-		switch test.series.Type() {
-		case Bool:
-			expected := test.expected
-			received := test.series.Map(and)
-			for i := 0; i < expected.Len(); i++ {
-				e, _ := expected.Elem(i).Bool()
-				r, _ := received.Elem(i).Bool()
-
-				if e != r {
-					t.Errorf(
-						"Test:%v\nExpected:\n%v\nReceived:\n%v",
-						testnum, expected, received,
-					)
-				}
-			}
-
-		case Float:
-			expected := test.expected
-			received := test.series.Map(doubleFloat64)
-			for i := 0; i < expected.Len(); i++ {
-				if !compareFloats(expected.Elem(i).Float(),
-					received.Elem(i).Float(), 6) {
-					t.Errorf(
-						"Test:%v\nExpected:\n%v\nReceived:\n%v",
-						testnum, expected, received,
-					)
-				}
-			}
-		case Int:
-			expected := test.expected
-			received := test.series.Map(add5Int)
-			for i := 0; i < expected.Len(); i++ {
-				e, _ := expected.Elem(i).Int()
-				r, _ := received.Elem(i).Int()
-				if e != r {
-					t.Errorf(
-						"Test:%v\nExpected:\n%v\nReceived:\n%v",
-						testnum, expected, received,
-					)
-				}
-			}
-		case String:
-			expected := test.expected
-			received := test.series.Map(trimXyZPrefix)
-			for i := 0; i < expected.Len(); i++ {
-				if strings.Compare(expected.Elem(i).String(),
-					received.Elem(i).String()) != 0 {
-					t.Errorf(
-						"Test:%v\nExpected:\n%v\nReceived:\n%v",
-						testnum, expected, received,
-					)
-				}
-			}
-		default:
-		}
-	}
-}
-
 func TestSeries_Sum(t *testing.T) {
 	tests := []struct {
 		series   Series
@@ -1838,8 +1701,8 @@ func TestSeries_Slice(t *testing.T) {
 		received := test.series.Slice(test.j, test.k)
 
 		for i := 0; i < expected.Len(); i++ {
-			if strings.Compare(expected.Elem(i).String(),
-				received.Elem(i).String()) != 0 {
+			if strings.Compare(expected.Record(i),
+				received.Record(i)) != 0 {
 				t.Errorf(
 					"Test:%v\nExpected:\n%v\nReceived:\n%v",
 					testnum, expected, received,
@@ -2009,9 +1872,9 @@ func TestSeries_Unique(t *testing.T) {
 			continue
 		}
 		for i, exp := range test.expected {
-			if got.Elem(i).String() != exp {
+			if got.Record(i) != exp {
 				t.Errorf("Test:%v[%d] expected %s got %s",
-					testnum, i, exp, got.Elem(i).String())
+					testnum, i, exp, got.Record(i))
 			}
 		}
 	}

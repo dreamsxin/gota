@@ -284,32 +284,3 @@ func BenchmarkSeries_Mean(b *testing.B) {
 		})
 	}
 }
-
-// BenchmarkSeries_Elem anchors the columnar-kernel RFC §1 baseline for
-// per-element interface dispatch ("Elem(i).Float() over 1M").
-func BenchmarkSeries_Elem(b *testing.B) {
-	table := []struct {
-		name   string
-		series series.Series
-	}{
-		{
-			"[]int(1000000)_Float",
-			series.Ints(generateInts(1000000)),
-		},
-		{
-			"[]float64(1000000)_Float",
-			series.Floats(generateFloats(1000000)),
-		},
-	}
-	for _, test := range table {
-		b.Run(test.name, func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				var sum float64
-				for row := 0; row < test.series.Len(); row++ {
-					sum += test.series.Elem(row).Float()
-				}
-				benchSink += sum
-			}
-		})
-	}
-}

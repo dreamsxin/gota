@@ -6,8 +6,8 @@ import (
 )
 
 // Time-component accessors. They require a Time series and return an Int
-// series; NaN elements stay NaN. Calling them on another type sets Err on
-// the result. Weekday follows time.Weekday: Sunday = 0.
+// series; missing elements stay missing. Calling them on another type sets
+// Err on the result. Weekday follows time.Weekday: Sunday = 0.
 
 func (s Series) mapTime(op string, f func(t time.Time) int64) Series {
 	if s.Err != nil {
@@ -17,13 +17,13 @@ func (s Series) mapTime(op string, f func(t time.Time) int64) Series {
 		return Series{Err: fmt.Errorf("%s: requires a Time series, got %s", op, s.t), Name: s.Name}
 	}
 	elems := s.elements.(timeElements)
-	out := make(intElements, len(elems))
-	for i, e := range elems {
-		if e.IsNA() {
-			out[i] = intElement{nan: true}
+	out := newColumn[int64](len(elems.data))
+	for i, v := range elems.data {
+		if !elems.isValid(i) {
+			out.setNA(i)
 			continue
 		}
-		out[i] = intElement{e: f(e.e)}
+		out.data[i] = f(v)
 	}
 	return Series{Name: s.Name, t: Int, elements: out}
 }

@@ -283,8 +283,8 @@ func TestSeriesShift_AllTypes(t *testing.T) {
 			if down.Err != nil {
 				t.Fatalf("Shift(1): %v", down.Err)
 			}
-			if !down.Elem(0).IsNA() {
-				t.Fatalf("Shift(1)[0] = %v, want NA", down.Elem(0))
+			if !down.IsNA(0) {
+				t.Fatalf("Shift(1)[0] = %v, want NA", down.Record(0))
 			}
 			got := down.Records()
 			for i := 1; i < len(got); i++ {
@@ -295,8 +295,8 @@ func TestSeriesShift_AllTypes(t *testing.T) {
 
 			up := c.s.Shift(-1)
 			got = up.Records()
-			if !up.Elem(len(got) - 1).IsNA() {
-				t.Fatalf("Shift(-1)[last] = %v, want NA", up.Elem(len(got)-1))
+			if !up.IsNA(len(got) - 1) {
+				t.Fatalf("Shift(-1)[last] = %v, want NA", up.Record(len(got)-1))
 			}
 			for i := 0; i < len(got)-1; i++ {
 				if got[i] != orig[i+1] {

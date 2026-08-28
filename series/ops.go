@@ -48,7 +48,7 @@ func (s Series) Replace(toReplace, with interface{}) Series {
 	}
 	elems := make([]interface{}, s.Len())
 	for i := 0; i < s.Len(); i++ {
-		val := s.Elem(i).Val()
+		val := s.Val(i)
 		if fmt.Sprintf("%v", val) == fmt.Sprintf("%v", toReplace) {
 			elems[i] = with
 		} else {
@@ -109,7 +109,7 @@ func (s Series) IsIn(values []interface{}) Series {
 	}
 	bools := make([]bool, s.Len())
 	for i := 0; i < s.Len(); i++ {
-		key := fmt.Sprintf("%v", s.Elem(i).Val())
+		key := fmt.Sprintf("%v", s.Val(i))
 		_, bools[i] = lookup[key]
 	}
 	result := Bools(bools)
@@ -300,11 +300,10 @@ func (s Series) Mode() Series {
 	counts := make(map[string]int, s.Len())
 	order := make([]string, 0, s.Len())
 	for i := 0; i < s.Len(); i++ {
-		e := s.Elem(i)
-		if e.IsNA() {
+		if s.IsNA(i) {
 			continue
 		}
-		k := e.String()
+		k := s.Record(i)
 		if counts[k] == 0 {
 			order = append(order, k)
 		}
@@ -349,9 +348,8 @@ func (s Series) Skew() float64 {
 	}
 	var vals []float64
 	for i := 0; i < s.Len(); i++ {
-		e := s.Elem(i)
-		if !e.IsNA() {
-			vals = append(vals, e.Float())
+		if !s.IsNA(i) {
+			vals = append(vals, s.FloatAt(i))
 		}
 	}
 	n := float64(len(vals))
@@ -393,9 +391,8 @@ func (s Series) Kurt() float64 {
 	}
 	var vals []float64
 	for i := 0; i < s.Len(); i++ {
-		e := s.Elem(i)
-		if !e.IsNA() {
-			vals = append(vals, e.Float())
+		if !s.IsNA(i) {
+			vals = append(vals, s.FloatAt(i))
 		}
 	}
 	n := float64(len(vals))

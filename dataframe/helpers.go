@@ -121,28 +121,155 @@ func transposeRecords(x [][]string) [][]string {
 	return y
 }
 
-// getDefaultElem returns a default element value for a given type
-func getDefaultElem(tpe series.Type) series.Element {
+// getDefaultVal returns a default fill value for a given column type.
+func getDefaultVal(tpe series.Type) interface{} {
 	switch tpe {
 	case series.String:
-		return defaultStringElem
+		return ""
 	case series.Int:
-		return defaultIntElem
+		return 0
 	case series.Float:
-		return defaultFloatElem
+		return 0.0
 	case series.Bool:
-		return defaultBoolElem
+		return false
 	}
 	return nil
 }
 
-// Default element values for pivot tables and other operations
-var (
-	defaultIntElem    = series.New([]int{0}, series.Int, "").Elem(0)
-	defaultStringElem = series.New([]string{""}, series.String, "").Elem(0)
-	defaultFloatElem  = series.New([]float64{0}, series.Float, "").Elem(0)
-	defaultBoolElem   = series.New([]bool{false}, series.Bool, "").Elem(0)
-)
+// valueString renders a typed cell value the same way series.Series.Record
+// does; nil renders as "NaN".
+func valueString(v interface{}) string {
+	switch val := v.(type) {
+	case nil:
+		return "NaN"
+	case int:
+		return strconv.FormatInt(int64(val), 10)
+	case int64:
+		return strconv.FormatInt(val, 10)
+	case float64:
+		return fmt.Sprintf("%f", val)
+	case string:
+		return val
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	case time.Time:
+		return val.Format(time.RFC3339)
+	default:
+		return fmt.Sprint(val)
+	}
+}
+
+// valueLess compares two typed cell values, used for pivot column ordering.
+// Values of different types are never ordered.
+func valueLess(a, b interface{}) bool {
+	switch av := a.(type) {
+	case int:
+		if bv, ok := b.(int); ok {
+			return av < bv
+		}
+	case int64:
+		if bv, ok := b.(int64); ok {
+			return av < bv
+		}
+	case float64:
+		if bv, ok := b.(float64); ok {
+			return av < bv
+		}
+	case string:
+		if bv, ok := b.(string); ok {
+			return av < bv
+		}
+	case bool:
+		if bv, ok := b.(bool); ok {
+			return !av && bv
+		}
+	case time.Time:
+		if bv, ok := b.(time.Time); ok {
+			return av.Before(bv)
+		}
+	}
+	return false
+}
+
+// valueGreater compares two typed cell values, used for pivot column ordering.
+func valueGreater(a, b interface{}) bool {
+	switch av := a.(type) {
+	case int:
+		if bv, ok := b.(int); ok {
+			return av > bv
+		}
+	case int64:
+		if bv, ok := b.(int64); ok {
+			return av > bv
+		}
+	case float64:
+		if bv, ok := b.(float64); ok {
+			return av > bv
+		}
+	case string:
+		if bv, ok := b.(string); ok {
+			return av > bv
+		}
+	case bool:
+		if bv, ok := b.(bool); ok {
+			return av && !bv
+		}
+	case time.Time:
+		if bv, ok := b.(time.Time); ok {
+			return av.After(bv)
+		}
+	}
+	return false
+}
+
+// seriesRowLess compares two valid rows of the same Series by typed value.
+func seriesRowLess(s series.Series, a, b int) bool {
+	switch s.Type() {
+	case series.Int:
+		va, _ := s.Int64At(a)
+		vb, _ := s.Int64At(b)
+		return va < vb
+	case series.Float:
+		return s.FloatAt(a) < s.FloatAt(b)
+	case series.String:
+		return s.Record(a) < s.Record(b)
+	case series.Bool:
+		va, _ := s.BoolAt(a)
+		vb, _ := s.BoolAt(b)
+		return !va && vb
+	case series.Time:
+		va, _ := s.TimeAt(a)
+		vb, _ := s.TimeAt(b)
+		return va.Before(vb)
+	}
+	return false
+}
+
+// seriesRowGreater compares two valid rows of the same Series by typed value.
+func seriesRowGreater(s series.Series, a, b int) bool {
+	switch s.Type() {
+	case series.Int:
+		va, _ := s.Int64At(a)
+		vb, _ := s.Int64At(b)
+		return va > vb
+	case series.Float:
+		return s.FloatAt(a) > s.FloatAt(b)
+	case series.String:
+		return s.Record(a) > s.Record(b)
+	case series.Bool:
+		va, _ := s.BoolAt(a)
+		vb, _ := s.BoolAt(b)
+		return va && !vb
+	case series.Time:
+		va, _ := s.TimeAt(a)
+		vb, _ := s.TimeAt(b)
+		return va.After(vb)
+	}
+	return false
+}
 
 // numWorkers returns the number of parallel workers to use for concurrent
 // operations. It is at least 1 and at most GOMAXPROCS.
@@ -226,18 +353,16 @@ func kMerge(s series.Series, chunks []sortChunk, reverse bool) []int {
 	less := func(a, b int) bool {
 		ai := chunks[heads[a].chunkIdx].idx[heads[a].pos]
 		bi := chunks[heads[b].chunkIdx].idx[heads[b].pos]
-		ea := s.Elem(ai)
-		eb := s.Elem(bi)
-		if ea.IsNA() {
+		if s.IsNA(ai) {
 			return false
 		}
-		if eb.IsNA() {
+		if s.IsNA(bi) {
 			return true
 		}
 		if reverse {
-			return ea.Greater(eb)
+			return seriesRowGreater(s, ai, bi)
 		}
-		return ea.Less(eb)
+		return seriesRowLess(s, ai, bi)
 	}
 
 	heapLen := len(heads)

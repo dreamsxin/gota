@@ -47,8 +47,8 @@ func TestSeries_RollingMean(t *testing.T) {
 		received := test.series.Rolling(test.window).Mean()
 
 		for i := 0; i < expected.Len(); i++ {
-			if strings.Compare(expected.Elem(i).String(),
-				received.Elem(i).String()) != 0 {
+			if strings.Compare(expected.Record(i),
+				received.Record(i)) != 0 {
 				t.Errorf(
 					"Test:%v\nExpected:\n%v\nReceived:\n%v",
 					testnum, expected, received,
@@ -92,7 +92,7 @@ func TestSeries_RollingStdDev(t *testing.T) {
 			continue
 		}
 		for i, expVal := range test.expected {
-			gotVal := received.Elem(i).Float()
+			gotVal := received.FloatAt(i)
 			if !rollingFloatEq(expVal, gotVal, eps) {
 				t.Errorf(
 					"Test:%v index %d: expected %v got %v",
@@ -127,7 +127,7 @@ func TestSeries_RollingSum(t *testing.T) {
 			continue
 		}
 		for i, expVal := range test.expected {
-			gotVal := received.Elem(i).Float()
+			gotVal := received.FloatAt(i)
 			if !rollingFloatEq(expVal, gotVal, 1e-13) {
 				t.Errorf("Test:%v[%d] expected %v got %v", testnum, i, expVal, gotVal)
 			}
@@ -159,7 +159,7 @@ func TestSeries_RollingMin(t *testing.T) {
 			continue
 		}
 		for i, expVal := range test.expected {
-			gotVal := received.Elem(i).Float()
+			gotVal := received.FloatAt(i)
 			if !rollingFloatEq(expVal, gotVal, 1e-13) {
 				t.Errorf("Test:%v[%d] expected %v got %v", testnum, i, expVal, gotVal)
 			}
@@ -191,7 +191,7 @@ func TestSeries_RollingMax(t *testing.T) {
 			continue
 		}
 		for i, expVal := range test.expected {
-			gotVal := received.Elem(i).Float()
+			gotVal := received.FloatAt(i)
 			if !rollingFloatEq(expVal, gotVal, 1e-13) {
 				t.Errorf("Test:%v[%d] expected %v got %v", testnum, i, expVal, gotVal)
 			}
@@ -215,7 +215,7 @@ func TestSeries_RollingApply(t *testing.T) {
 		t.Fatalf("length mismatch: expected %d got %d", len(expected), received.Len())
 	}
 	for i, expVal := range expected {
-		gotVal := received.Elem(i).Float()
+		gotVal := received.FloatAt(i)
 		if !rollingFloatEq(expVal, gotVal, 1e-13) {
 			t.Errorf("[%d] expected %v got %v", i, expVal, gotVal)
 		}
@@ -231,7 +231,7 @@ func TestSeries_RollingMinPeriods(t *testing.T) {
 		t.Fatalf("length mismatch: expected %d got %d", len(expected), received.Len())
 	}
 	for i, expVal := range expected {
-		gotVal := received.Elem(i).Float()
+		gotVal := received.FloatAt(i)
 		if !rollingFloatEq(expVal, gotVal, 1e-13) {
 			t.Errorf("[%d] expected %v got %v", i, expVal, gotVal)
 		}

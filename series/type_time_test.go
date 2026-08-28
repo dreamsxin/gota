@@ -31,8 +31,8 @@ func TestTimeSeries_Copy(t *testing.T) {
 		t.Errorf("Copy: got %v want %v", c.Records(), s.Records())
 	}
 	// Mutating copy must not affect original.
-	c.Elem(0).Set(t3)
-	if s.Elem(0).String() == c.Elem(0).String() {
+	c.Set(0, New([]time.Time{t3}, Time, ""))
+	if s.Record(0) == c.Record(0) {
 		t.Error("Copy: modifying copy affected original")
 	}
 }
@@ -43,8 +43,8 @@ func TestTimeSeries_Append(t *testing.T) {
 	if s.Len() != 3 {
 		t.Fatalf("Append: len=%d want 3", s.Len())
 	}
-	if s.Elem(2).String() != t2.Format(time.RFC3339) {
-		t.Errorf("Append: elem[2]=%s want %s", s.Elem(2).String(), t2.Format(time.RFC3339))
+	if s.Record(2) != t2.Format(time.RFC3339) {
+		t.Errorf("Append: elem[2]=%s want %s", s.Record(2), t2.Format(time.RFC3339))
 	}
 }
 
@@ -57,11 +57,11 @@ func TestTimeSeries_Subset(t *testing.T) {
 	if sub.Len() != 2 {
 		t.Fatalf("Subset: len=%d want 2", sub.Len())
 	}
-	if sub.Elem(0).String() != t1.Format(time.RFC3339) {
-		t.Errorf("Subset[0]: got %s want %s", sub.Elem(0).String(), t1.Format(time.RFC3339))
+	if sub.Record(0) != t1.Format(time.RFC3339) {
+		t.Errorf("Subset[0]: got %s want %s", sub.Record(0), t1.Format(time.RFC3339))
 	}
-	if sub.Elem(1).String() != t3.Format(time.RFC3339) {
-		t.Errorf("Subset[1]: got %s want %s", sub.Elem(1).String(), t3.Format(time.RFC3339))
+	if sub.Record(1) != t3.Format(time.RFC3339) {
+		t.Errorf("Subset[1]: got %s want %s", sub.Record(1), t3.Format(time.RFC3339))
 	}
 }
 
@@ -92,11 +92,11 @@ func TestTimeSeries_FillNaN(t *testing.T) {
 	if filled.Err != nil {
 		t.Fatal(filled.Err)
 	}
-	if filled.Elem(1).IsNA() {
+	if filled.IsNA(1) {
 		t.Error("FillNaN: elem[1] still NaN after fill")
 	}
-	if filled.Elem(1).String() != t1.Format(time.RFC3339) {
-		t.Errorf("FillNaN: elem[1]=%s want %s", filled.Elem(1).String(), t1.Format(time.RFC3339))
+	if filled.Record(1) != t1.Format(time.RFC3339) {
+		t.Errorf("FillNaN: elem[1]=%s want %s", filled.Record(1), t1.Format(time.RFC3339))
 	}
 }
 
@@ -108,8 +108,8 @@ func TestTimeSeries_FillNaNForward(t *testing.T) {
 	}
 	// [t0, t0, t0, t3]
 	for i, want := range []time.Time{t0, t0, t0, t3} {
-		if filled.Elem(i).String() != want.Format(time.RFC3339) {
-			t.Errorf("FillNaNForward[%d]: got %s want %s", i, filled.Elem(i).String(), want.Format(time.RFC3339))
+		if filled.Record(i) != want.Format(time.RFC3339) {
+			t.Errorf("FillNaNForward[%d]: got %s want %s", i, filled.Record(i), want.Format(time.RFC3339))
 		}
 	}
 }
@@ -122,8 +122,8 @@ func TestTimeSeries_FillNaNBackward(t *testing.T) {
 	}
 	// [t2, t2, t2, t3]
 	for i, want := range []time.Time{t2, t2, t2, t3} {
-		if filled.Elem(i).String() != want.Format(time.RFC3339) {
-			t.Errorf("FillNaNBackward[%d]: got %s want %s", i, filled.Elem(i).String(), want.Format(time.RFC3339))
+		if filled.Record(i) != want.Format(time.RFC3339) {
+			t.Errorf("FillNaNBackward[%d]: got %s want %s", i, filled.Record(i), want.Format(time.RFC3339))
 		}
 	}
 }
@@ -132,10 +132,10 @@ func TestTimeSeries_FillNaNForwardLimit(t *testing.T) {
 	s := New([]interface{}{t0, nil, nil, nil, t3}, Time, "t")
 	filled := s.FillNaNForwardLimit(2)
 	// [t0, t0, t0, NaN, t3]
-	if filled.Elem(1).IsNA() || filled.Elem(2).IsNA() {
+	if filled.IsNA(1) || filled.IsNA(2) {
 		t.Error("FillNaNForwardLimit(2): elem[1] or [2] should be filled")
 	}
-	if !filled.Elem(3).IsNA() {
+	if !filled.IsNA(3) {
 		t.Error("FillNaNForwardLimit(2): elem[3] should remain NaN")
 	}
 }
@@ -144,10 +144,10 @@ func TestTimeSeries_FillNaNBackwardLimit(t *testing.T) {
 	s := New([]interface{}{nil, nil, nil, t3, t2}, Time, "t")
 	filled := s.FillNaNBackwardLimit(1)
 	// [NaN, NaN, t3, t3, t2]
-	if !filled.Elem(0).IsNA() || !filled.Elem(1).IsNA() {
+	if !filled.IsNA(0) || !filled.IsNA(1) {
 		t.Error("FillNaNBackwardLimit(1): elem[0] and [1] should remain NaN")
 	}
-	if filled.Elem(2).IsNA() {
+	if filled.IsNA(2) {
 		t.Error("FillNaNBackwardLimit(1): elem[2] should be filled")
 	}
 }
@@ -181,10 +181,9 @@ func TestTimeSeries_NaN(t *testing.T) {
 
 func TestTimeSeries_Elem_Conversions(t *testing.T) {
 	s := timeSeries(t0)
-	e := s.Elem(0)
 
 	// Int() → unix timestamp
-	i, err := e.Int()
+	i, err := s.IntAt(0)
 	if err != nil {
 		t.Fatalf("Int(): %v", err)
 	}
@@ -193,13 +192,13 @@ func TestTimeSeries_Elem_Conversions(t *testing.T) {
 	}
 
 	// Float() → unix timestamp as float
-	f := e.Float()
+	f := s.FloatAt(0)
 	if f != float64(t0.Unix()) {
 		t.Errorf("Float(): got %v want %v", f, float64(t0.Unix()))
 	}
 
 	// Time() → original value
-	tv, err := e.Time()
+	tv, err := s.TimeAt(0)
 	if err != nil {
 		t.Fatalf("Time(): %v", err)
 	}

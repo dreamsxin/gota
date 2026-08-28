@@ -11,97 +11,63 @@ func (s Series) Shift(periods int) Series {
 		return s.Copy()
 	}
 	n := s.Len()
-	ret := Series{Name: s.Name, t: s.t}
 	if n == 0 {
 		return s.Empty()
 	}
+	ret := Series{Name: s.Name, t: s.t}
 	abs := boundedShiftAbs(periods, n)
 
 	switch elems := s.elements.(type) {
 	case stringElements:
-		out := make(stringElements, n)
-		if periods > 0 {
-			markStringNA(out[:abs])
-			copy(out[abs:], elems[:n-abs])
-		} else {
-			copy(out, elems[abs:])
-			markStringNA(out[n-abs:])
-		}
-		ret.elements = out
+		ret.elements = shiftColumn(elems, n, periods, abs)
 	case intElements:
-		out := make(intElements, n)
-		if periods > 0 {
-			markIntNA(out[:abs])
-			copy(out[abs:], elems[:n-abs])
-		} else {
-			copy(out, elems[abs:])
-			markIntNA(out[n-abs:])
-		}
-		ret.elements = out
+		ret.elements = shiftColumn(elems, n, periods, abs)
 	case floatElements:
-		out := make(floatElements, n)
-		if periods > 0 {
-			markFloatNA(out[:abs])
-			copy(out[abs:], elems[:n-abs])
-		} else {
-			copy(out, elems[abs:])
-			markFloatNA(out[n-abs:])
-		}
-		ret.elements = out
+		ret.elements = shiftColumn(elems, n, periods, abs)
 	case boolElements:
-		out := make(boolElements, n)
-		if periods > 0 {
-			markBoolNA(out[:abs])
-			copy(out[abs:], elems[:n-abs])
-		} else {
-			copy(out, elems[abs:])
-			markBoolNA(out[n-abs:])
-		}
-		ret.elements = out
+		ret.elements = shiftColumn(elems, n, periods, abs)
 	case timeElements:
-		out := make(timeElements, n)
-		if periods > 0 {
-			markTimeNA(out[:abs])
-			copy(out[abs:], elems[:n-abs])
-		} else {
-			copy(out, elems[abs:])
-			markTimeNA(out[n-abs:])
-		}
-		ret.elements = out
+		ret.elements = shiftColumn(elems, n, periods, abs)
 	default:
 		return s.Copy()
 	}
 	return ret
 }
 
-func markStringNA(elems stringElements) {
-	for i := range elems {
-		elems[i].nan = true
+// shiftColumn copies values by |periods| positions and marks the vacated
+// edge as missing.
+func shiftColumn[T any](src column[T], n, periods, abs int) column[T] {
+	out := newColumn[T](n)
+	if periods > 0 {
+		copy(out.data[abs:], src.data[:n-abs])
+	} else {
+		copy(out.data, src.data[abs:])
 	}
-}
-
-func markIntNA(elems intElements) {
-	for i := range elems {
-		elems[i].nan = true
+	// Carry source validity into shifted positions.
+	if src.validity != nil {
+		out.ensureValidity()
+		if periods > 0 {
+			for i := abs; i < n; i++ {
+				if !src.isValid(i - abs) {
+					out.validity.clear(i)
+				}
+			}
+		} else {
+			for i := 0; i < n-abs; i++ {
+				if !src.isValid(i + abs) {
+					out.validity.clear(i)
+				}
+			}
+		}
 	}
-}
-
-func markFloatNA(elems floatElements) {
-	for i := range elems {
-		elems[i].nan = true
+	// Mark the vacated edge as missing.
+	out.ensureValidity()
+	if periods > 0 {
+		out.validity.clearRange(0, abs)
+	} else {
+		out.validity.clearRange(n-abs, n)
 	}
-}
-
-func markBoolNA(elems boolElements) {
-	for i := range elems {
-		elems[i].nan = true
-	}
-}
-
-func markTimeNA(elems timeElements) {
-	for i := range elems {
-		elems[i].nan = true
-	}
+	return out
 }
 
 func boundedShiftAbs(periods int, limit int) int {

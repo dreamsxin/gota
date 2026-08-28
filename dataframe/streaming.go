@@ -447,7 +447,7 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 		// Cache string representations to avoid repeated conversion.
 		strs := make([]string, n)
 		for i := 0; i < n; i++ {
-			strs[i] = col.Elem(i).String()
+			strs[i] = col.Record(i)
 		}
 		for i, s := range strs {
 			_, found := lookup[s]
@@ -467,7 +467,7 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 		if numErr == nil {
 			floats := col.Float()
 			for i := 0; i < n; i++ {
-				if col.Elem(i).IsNA() {
+				if col.IsNA(i) {
 					result[i] = false
 					continue
 				}
@@ -490,7 +490,7 @@ func (df DataFrame) evalQueryClause(cond string) ([]bool, error) {
 		} else {
 			strs := col.Records() // single allocation, no per-row fmt.Sprintf
 			for i := 0; i < n; i++ {
-				if col.Elem(i).IsNA() {
+				if col.IsNA(i) {
 					result[i] = false
 					continue
 				}

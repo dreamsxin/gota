@@ -90,9 +90,9 @@ func TestFromSQL_NullValues(t *testing.T) {
 		t.Errorf("FromSQL NULLs rows: got %d want 3", df.Nrow())
 	}
 	// Row 1 (NULL) should appear as NaN in Float column.
-	v := df.Col("val").Elem(1)
-	if !v.IsNA() {
-		t.Errorf("FromSQL NULLs: expected NaN at row 1, got %v", v.Val())
+	v := df.Col("val")
+	if !v.IsNA(1) {
+		t.Errorf("FromSQL NULLs: expected NaN at row 1, got %v", v.Val(1))
 	}
 }
 

@@ -2,101 +2,36 @@ package series
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"sort"
 	"strings"
 	"time"
 
-	"math"
-
 	"gonum.org/v1/gonum/stat"
 )
 
 // Series is a data structure designed for operating on arrays of elements that
-// should comply with a certain type structure. They are flexible enough that can
-// be transformed to other Series types and account for missing or non valid
-// elements. Most of the power of Series resides on the ability to compare and
-// subset Series of different types.
+// should comply with a certain type structure. They are flexible enough that
+// can be transformed to other Series types and account for missing or non
+// valid elements. Most of the power of Series resides on the ability to
+// compare and subset Series of different types.
+//
+// Storage is a contiguous typed column buffer with a validity bitmap; see
+// docs/rfc-columnar-kernel.md. Missing values are tracked by the bitmap,
+// never by sentinel values.
 type Series struct {
-	Name     string   // The name of the series
-	elements Elements // The values of the elements
-	t        Type     // The type of the series
+	Name     string // The name of the series
+	elements store  // The column buffer holding the values
+	t        Type   // The type of the series
 
 	// deprecated: use Error() instead
 	Err error
 }
 
-// Elements is the interface that represents the array of elements contained on
-// a Series.
-type Elements interface {
-	Elem(int) Element
-	Len() int
-}
-
-// Element is the interface that defines the types of methods to be present for
-// elements of a Series
-type Element interface {
-	// Setter method
-	Set(interface{})
-
-	// Comparation methods
-	Eq(Element) bool
-	Neq(Element) bool
-	Less(Element) bool
-	LessEq(Element) bool
-	Greater(Element) bool
-	GreaterEq(Element) bool
-
-	// Accessor/conversion methods
-	Copy() Element     // FIXME: Returning interface is a recipe for pain
-	Val() ElementValue // FIXME: Returning interface is a recipe for pain
-	String() string
-	Int() (int, error)
-	Int64() (int64, error)
-	Float() float64
-	Bool() (bool, error)
-	Time() (time.Time, error)
-
-	// Information methods
-	IsNA() bool
-	Type() Type
-}
-
-// intElements is the concrete implementation of Elements for Int elements.
-type intElements []intElement
-
-func (e intElements) Len() int           { return len(e) }
-func (e intElements) Elem(i int) Element { return &e[i] }
-
-// stringElements is the concrete implementation of Elements for String elements.
-type stringElements []stringElement
-
-func (e stringElements) Len() int           { return len(e) }
-func (e stringElements) Elem(i int) Element { return &e[i] }
-
-// floatElements is the concrete implementation of Elements for Float elements.
-type floatElements []floatElement
-
-func (e floatElements) Len() int           { return len(e) }
-func (e floatElements) Elem(i int) Element { return &e[i] }
-
-// boolElements is the concrete implementation of Elements for Bool elements.
-type boolElements []boolElement
-
-func (e boolElements) Len() int           { return len(e) }
-func (e boolElements) Elem(i int) Element { return &e[i] }
-
-// timeElement is the concrete implementation of Elements for time elements.
-type timeElements []timeElement
-
-func (e timeElements) Len() int           { return len(e) }
-func (e timeElements) Elem(i int) Element { return &e[i] }
-
-// ElementValue represents the value that can be used for marshaling or
-// unmarshaling Elements.
-type ElementValue interface{}
-
-type MapFunction func(Element) Element
+// compFunc defines a user-defined comparator function over a Series row.
+// Used internally for type assertions.
+type compFunc = func(s Series, i int) bool
 
 // Comparator is a convenience alias that can be used for a more type safe way of
 // reason and use comparators.
@@ -114,9 +49,6 @@ const (
 	Out       Comparator = "out"  // Outside
 	CompFunc  Comparator = "func" // user-defined comparison function
 )
-
-// compFunc defines a user-defined comparator function. Used internally for type assertions
-type compFunc = func(el Element) bool
 
 // Type is a convenience alias that can be used for a more type safe way of
 // reason and use Series types.
@@ -141,6 +73,28 @@ const (
 //	Series [Bool]  // Same as []bool
 type Indexes interface{}
 
+// emptyStore returns an empty buffer of the given type with the requested
+// capacity.
+func emptyStore(t Type, capacity int) store {
+	if capacity < 0 {
+		capacity = 0
+	}
+	switch t {
+	case String:
+		return newColumnCap[string](capacity)
+	case Int:
+		return newColumnCap[int64](capacity)
+	case Float:
+		return newColumnCap[float64](capacity)
+	case Bool:
+		return newColumnCap[bool](capacity)
+	case Time:
+		return newColumnCap[time.Time](capacity)
+	default:
+		panic(fmt.Sprintf("unknown type %v", t))
+	}
+}
+
 // New is the generic Series constructor
 func New(values interface{}, t Type, name string) Series {
 	ret := Series{
@@ -148,19 +102,19 @@ func New(values interface{}, t Type, name string) Series {
 		t:    t,
 	}
 
-	// Pre-allocate elements
+	// Pre-allocate a zeroed buffer of the requested length.
 	preAlloc := func(n int) {
 		switch t {
 		case String:
-			ret.elements = make(stringElements, n)
+			ret.elements = newColumn[string](n)
 		case Int:
-			ret.elements = make(intElements, n)
+			ret.elements = newColumn[int64](n)
 		case Float:
-			ret.elements = make(floatElements, n)
+			ret.elements = newColumn[float64](n)
 		case Bool:
-			ret.elements = make(boolElements, n)
+			ret.elements = newColumn[bool](n)
 		case Time:
-			ret.elements = make(timeElements, n)
+			ret.elements = newColumn[time.Time](n)
 		default:
 			panic(fmt.Sprintf("unknown type %v", t))
 		}
@@ -168,7 +122,7 @@ func New(values interface{}, t Type, name string) Series {
 
 	if values == nil {
 		preAlloc(1)
-		ret.elements.Elem(0).Set(nil)
+		setAt(&ret.elements, t, 0, nil)
 		return ret
 	}
 
@@ -177,10 +131,9 @@ func New(values interface{}, t Type, name string) Series {
 		if ret, ok := stringsToSeriesDirect(v, t, name); ok {
 			return ret
 		}
-		l := len(v)
-		preAlloc(l)
-		for i := 0; i < l; i++ {
-			ret.elements.Elem(i).Set(v[i])
+		ret.elements = emptyStore(t, 0)
+		for _, sv := range v {
+			appendAs(&ret.elements, t, sv)
 		}
 	case []float64:
 		if t == Float {
@@ -188,10 +141,9 @@ func New(values interface{}, t Type, name string) Series {
 			ret.Name = name
 			return ret
 		}
-		l := len(v)
-		preAlloc(l)
-		for i := 0; i < l; i++ {
-			ret.elements.Elem(i).Set(v[i])
+		ret.elements = emptyStore(t, 0)
+		for _, fv := range v {
+			appendAs(&ret.elements, t, fv)
 		}
 	case []int:
 		switch t {
@@ -202,10 +154,9 @@ func New(values interface{}, t Type, name string) Series {
 		case Float:
 			return BatchConvertInts(v, Float, name)
 		}
-		l := len(v)
-		preAlloc(l)
-		for i := 0; i < l; i++ {
-			ret.elements.Elem(i).Set(v[i])
+		ret.elements = emptyStore(t, 0)
+		for _, iv := range v {
+			appendAs(&ret.elements, t, iv)
 		}
 	case []bool:
 		if t == Bool {
@@ -213,10 +164,9 @@ func New(values interface{}, t Type, name string) Series {
 			ret.Name = name
 			return ret
 		}
-		l := len(v)
-		preAlloc(l)
-		for i := 0; i < l; i++ {
-			ret.elements.Elem(i).Set(v[i])
+		ret.elements = emptyStore(t, 0)
+		for _, bv := range v {
+			appendAs(&ret.elements, t, bv)
 		}
 	case []time.Time:
 		if t == Time {
@@ -224,32 +174,31 @@ func New(values interface{}, t Type, name string) Series {
 			ret.Name = name
 			return ret
 		}
-		l := len(v)
-		preAlloc(l)
-		for i := 0; i < l; i++ {
-			ret.elements.Elem(i).Set(v[i])
+		ret.elements = emptyStore(t, 0)
+		for _, tv := range v {
+			appendAs(&ret.elements, t, tv)
 		}
 	case Series:
-		l := v.Len()
-		preAlloc(l)
-		for i := 0; i < l; i++ {
-			ret.elements.Elem(i).Set(v.elements.Elem(i))
+		ret.elements = emptyStore(t, 0)
+		for i := 0; i < v.Len(); i++ {
+			if v.IsNA(i) {
+				appendAs(&ret.elements, t, "NaN")
+			} else {
+				appendAs(&ret.elements, t, v.Val(i))
+			}
 		}
 	default:
 		switch reflect.TypeOf(values).Kind() {
 		case reflect.Slice:
-			v := reflect.ValueOf(values)
-			l := v.Len()
-			preAlloc(v.Len())
+			rv := reflect.ValueOf(values)
+			l := rv.Len()
+			ret.elements = emptyStore(t, 0)
 			for i := 0; i < l; i++ {
-				val := v.Index(i).Interface()
-				ret.elements.Elem(i).Set(val)
+				appendAs(&ret.elements, t, rv.Index(i).Interface())
 			}
 		default:
-			preAlloc(1)
-			v := reflect.ValueOf(values)
-			val := v.Interface()
-			ret.elements.Elem(0).Set(val)
+			ret.elements = emptyStore(t, 0)
+			appendAs(&ret.elements, t, reflect.ValueOf(values).Interface())
 		}
 	}
 
@@ -289,25 +238,7 @@ func (s Series) Empty() Series {
 // EmptyWithCapacity returns an empty Series of the same type with enough
 // capacity for callers that know the result size up front.
 func (s Series) EmptyWithCapacity(capacity int) Series {
-	if capacity < 0 {
-		capacity = 0
-	}
-	ret := Series{Name: s.Name, t: s.t}
-	switch s.t {
-	case String:
-		ret.elements = make(stringElements, 0, capacity)
-	case Int:
-		ret.elements = make(intElements, 0, capacity)
-	case Float:
-		ret.elements = make(floatElements, 0, capacity)
-	case Bool:
-		ret.elements = make(boolElements, 0, capacity)
-	case Time:
-		ret.elements = make(timeElements, 0, capacity)
-	default:
-		panic(fmt.Sprintf("unknown type %v", s.t))
-	}
-	return ret
+	return Series{Name: s.Name, t: s.t, elements: emptyStore(s.t, capacity)}
 }
 
 // Returns Error or nil if no error occured
@@ -320,19 +251,8 @@ func (s *Series) Fill(num int, values interface{}) {
 		return
 	}
 	news := New(values, s.t, s.Name)
-	for i := s.elements.Len(); i < num; i++ {
-		switch s.t {
-		case String:
-			s.elements = append(s.elements.(stringElements), news.elements.(stringElements)...)
-		case Int:
-			s.elements = append(s.elements.(intElements), news.elements.(intElements)...)
-		case Float:
-			s.elements = append(s.elements.(floatElements), news.elements.(floatElements)...)
-		case Bool:
-			s.elements = append(s.elements.(boolElements), news.elements.(boolElements)...)
-		case Time:
-			s.elements = append(s.elements.(timeElements), news.elements.(timeElements)...)
-		}
+	for i := s.Len(); i < num; i++ {
+		s.elements = s.elements.appendStore(news.elements)
 	}
 }
 
@@ -346,18 +266,7 @@ func (s *Series) Append(values interface{}) {
 		return
 	}
 	news := New(values, s.t, s.Name)
-	switch s.t {
-	case String:
-		s.elements = append(s.elements.(stringElements), news.elements.(stringElements)...)
-	case Int:
-		s.elements = append(s.elements.(intElements), news.elements.(intElements)...)
-	case Float:
-		s.elements = append(s.elements.(floatElements), news.elements.(floatElements)...)
-	case Bool:
-		s.elements = append(s.elements.(boolElements), news.elements.(boolElements)...)
-	case Time:
-		s.elements = append(s.elements.(timeElements), news.elements.(timeElements)...)
-	}
+	s.elements = s.elements.appendStore(news.elements)
 }
 
 func (s *Series) appendScalar(value interface{}) bool {
@@ -370,28 +279,9 @@ func (s *Series) appendScalar(value interface{}) bool {
 			return false
 		}
 	}
-
 	switch s.t {
-	case String:
-		var elem stringElement
-		elem.Set(value)
-		s.elements = append(s.elements.(stringElements), elem)
-	case Int:
-		var elem intElement
-		elem.Set(value)
-		s.elements = append(s.elements.(intElements), elem)
-	case Float:
-		var elem floatElement
-		elem.Set(value)
-		s.elements = append(s.elements.(floatElements), elem)
-	case Bool:
-		var elem boolElement
-		elem.Set(value)
-		s.elements = append(s.elements.(boolElements), elem)
-	case Time:
-		var elem timeElement
-		elem.Set(value)
-		s.elements = append(s.elements.(timeElements), elem)
+	case String, Int, Float, Bool, Time:
+		appendAs(&s.elements, s.t, value)
 	default:
 		return false
 	}
@@ -423,45 +313,11 @@ func (s Series) Subset(indexes Indexes) Series {
 		s.Err = err
 		return s
 	}
-	ret := Series{
-		Name: s.Name,
-		t:    s.t,
+	return Series{
+		Name:     s.Name,
+		t:        s.t,
+		elements: s.elements.gatherStore(idx),
 	}
-	switch s.t {
-	case String:
-		elements := make(stringElements, len(idx))
-		for k, i := range idx {
-			elements[k] = s.elements.(stringElements)[i]
-		}
-		ret.elements = elements
-	case Int:
-		elements := make(intElements, len(idx))
-		for k, i := range idx {
-			elements[k] = s.elements.(intElements)[i]
-		}
-		ret.elements = elements
-	case Float:
-		elements := make(floatElements, len(idx))
-		for k, i := range idx {
-			elements[k] = s.elements.(floatElements)[i]
-		}
-		ret.elements = elements
-	case Bool:
-		elements := make(boolElements, len(idx))
-		for k, i := range idx {
-			elements[k] = s.elements.(boolElements)[i]
-		}
-		ret.elements = elements
-	case Time:
-		elements := make(timeElements, len(idx))
-		for k, i := range idx {
-			elements[k] = s.elements.(timeElements)[i]
-		}
-		ret.elements = elements
-	default:
-		panic("unknown series type")
-	}
-	return ret
 }
 
 // Set sets the values on the indexes of a Series and returns the reference
@@ -488,28 +344,29 @@ func (s Series) Set(indexes Indexes, newvalues Series) Series {
 			s.Err = fmt.Errorf("set error: index out of range")
 			return s
 		}
-		s.elements.Elem(i).Set(newvalues.elements.Elem(k))
+		if newvalues.IsNA(k) {
+			setAt(&s.elements, s.t, i, "NaN")
+		} else {
+			setAt(&s.elements, s.t, i, newvalues.Val(k))
+		}
 	}
 	return s
 }
 
 // HasNaN checks whether the Series contain NaN elements.
 func (s Series) HasNaN() bool {
-	for i := 0; i < s.Len(); i++ {
-		if s.elements.Elem(i).IsNA() {
-			return true
-		}
+	if s.elements == nil {
+		return false
 	}
-	return false
+	return s.elements.storeHasNA()
 }
 
 // IsNaN returns an array that identifies which of the elements are NaN.
 func (s Series) IsNaN() []bool {
-	ret := make([]bool, s.Len())
-	for i := 0; i < s.Len(); i++ {
-		ret[i] = s.elements.Elem(i).IsNA()
+	if s.elements == nil {
+		return nil
 	}
-	return ret
+	return s.elements.storeIsNA()
 }
 
 func (s Series) FillNaN(value Series) Series {
@@ -521,43 +378,90 @@ func (s Series) FillNaN(value Series) Series {
 	return s
 }
 
-// FillNaNForward fills NaN values with the most recent non-NaN value that
-// precedes them (forward fill / ffill).  Leading NaNs that have no predecessor
-// are left as NaN.
-func (s Series) FillNaNForward() Series {
-	result := s.Copy()
-	var lastVal interface{}
-	for i := 0; i < result.Len(); i++ {
-		elem := result.Elem(i)
-		if elem.IsNA() {
-			if lastVal != nil {
-				elem.Set(lastVal)
+// fillCopyRange copies values inside a cloned buffer to fill missing slots.
+// forward fills each missing slot with the closest preceding valid value;
+// backward fills with the closest following valid value. limit <= 0 fills
+// unbounded runs, otherwise only the first limit slots of every run.
+func fillCopyRange[T any](col *column[T], forward bool, limit int) {
+	if !col.storeHasNA() {
+		return
+	}
+	col.ensureValidity()
+	n := len(col.data)
+	if forward {
+		last := -1
+		streak := 0
+		for i := 0; i < n; i++ {
+			if col.validity.get(i) {
+				last = i
+				streak = 0
+				continue
 			}
-		} else {
-			lastVal = elem.Val()
+			streak++
+			if last >= 0 && (limit <= 0 || streak <= limit) {
+				col.data[i] = col.data[last]
+				col.validity.set(i)
+			}
 		}
+	} else {
+		next := -1
+		streak := 0
+		for i := n - 1; i >= 0; i-- {
+			if col.validity.get(i) {
+				next = i
+				streak = 0
+				continue
+			}
+			streak++
+			if next >= 0 && (limit <= 0 || streak <= limit) {
+				col.data[i] = col.data[next]
+				col.validity.set(i)
+			}
+		}
+	}
+}
+
+func (s Series) fillNaCopy(forward bool, limit int) Series {
+	result := s.Copy()
+	switch col := result.elements.(type) {
+	case intElements:
+		fillCopyRange(&col, forward, limit)
+		result.elements = col
+	case floatElements:
+		fillCopyRange(&col, forward, limit)
+		result.elements = col
+	case stringElements:
+		fillCopyRange(&col, forward, limit)
+		result.elements = col
+	case boolElements:
+		fillCopyRange(&col, forward, limit)
+		result.elements = col
+	case timeElements:
+		fillCopyRange(&col, forward, limit)
+		result.elements = col
 	}
 	return result
 }
 
+// FillNaNForward fills NaN values with the most recent non-NaN value that
+// precedes them (forward fill / ffill).  Leading NaNs that have no predecessor
+// are left as NaN.
+func (s Series) FillNaNForward() Series { return s.fillNaCopy(true, 0) }
+
 // FillNaNBackward fills NaN values with the nearest non-NaN value that
 // follows them (backward fill / bfill).  Trailing NaNs that have no successor
 // are left as NaN.
-func (s Series) FillNaNBackward() Series {
-	result := s.Copy()
-	var nextVal interface{}
-	for i := result.Len() - 1; i >= 0; i-- {
-		elem := result.Elem(i)
-		if elem.IsNA() {
-			if nextVal != nil {
-				elem.Set(nextVal)
-			}
-		} else {
-			nextVal = elem.Val()
-		}
-	}
-	return result
-}
+func (s Series) FillNaNBackward() Series { return s.fillNaCopy(false, 0) }
+
+// FillNaNForwardLimit fills NaN values with the most recent non-NaN value,
+// but only for up to `limit` consecutive NaN positions.
+// limit <= 0 means no limit (equivalent to FillNaNForward).
+func (s Series) FillNaNForwardLimit(limit int) Series { return s.fillNaCopy(true, limit) }
+
+// FillNaNBackwardLimit fills NaN values with the nearest following non-NaN value,
+// but only for up to `limit` consecutive NaN positions.
+// limit <= 0 means no limit (equivalent to FillNaNBackward).
+func (s Series) FillNaNBackwardLimit(limit int) Series { return s.fillNaCopy(false, limit) }
 
 // Compare compares the values of a Series with other elements. To do so, the
 // elements with are to be compared are first transformed to a Series of the same
@@ -566,164 +470,208 @@ func (s Series) Compare(comparator Comparator, comparando interface{}) Series {
 	if err := s.Err; err != nil {
 		return s
 	}
-	compareElements := func(a, b Element, c Comparator) (bool, error) {
-		var ret bool
-		switch c {
-		case Eq:
-			ret = a.Eq(b)
-		case Neq:
-			ret = a.Neq(b)
-		case Greater:
-			ret = a.Greater(b)
-		case GreaterEq:
-			ret = a.GreaterEq(b)
-		case Less:
-			ret = a.Less(b)
-		case LessEq:
-			ret = a.LessEq(b)
-		default:
-			return false, fmt.Errorf("unknown comparator: %v", c)
-		}
-		return ret, nil
-	}
-
-	bools := make([]bool, s.Len())
 
 	// CompFunc comparator comparison
 	if comparator == CompFunc {
 		f, ok := comparando.(compFunc)
 		if !ok {
 			ret := s.Empty()
-			ret.Err = fmt.Errorf("comparando is not a comparison function of type func(el Element) bool")
+			ret.Err = fmt.Errorf("comparando is not a comparison function of type func(s Series, i int) bool")
 			return ret
 		}
-
+		bools := make([]bool, s.Len())
 		for i := 0; i < s.Len(); i++ {
-			e := s.elements.Elem(i)
-			bools[i] = f(e)
+			bools[i] = f(s, i)
 		}
-
 		return Bools(bools)
 	}
 
 	comp := New(comparando, s.t, "")
-	// In comparator comparison
-	if comparator == In { // Inside
+
+	// In/Out membership comparison
+	if comparator == In || comparator == Out {
+		bools := make([]bool, s.Len())
 		for i := 0; i < s.Len(); i++ {
-			e := s.elements.Elem(i)
-			b := false
+			found := false
 			for j := 0; j < comp.Len(); j++ {
-				m := comp.elements.Elem(j)
-				c, err := compareElements(e, m, Eq)
-				if err != nil {
-					s = s.Empty()
-					s.Err = err
-					return s
-				}
-				if c {
-					b = true
+				if valuesEqual(s, i, comp, j) {
+					found = true
 					break
 				}
 			}
-			bools[i] = b
+			if comparator == In {
+				bools[i] = found
+			} else {
+				bools[i] = !found
+			}
 		}
 		return Bools(bools)
 	}
 
-	if comparator == Out { // Outside
-		for i := 0; i < s.Len(); i++ {
-			e := s.elements.Elem(i)
-			b := true
-			for j := 0; j < comp.Len(); j++ {
-				m := comp.elements.Elem(j)
-				c, err := compareElements(e, m, Eq)
-				if err != nil {
-					s = s.Empty()
-					s.Err = err
-					return s
-				}
-				if c {
-					b = false
-					break
-				}
-			}
-			bools[i] = b
-		}
-		return Bools(bools)
+	if comparator != Eq && comparator != Neq && comparator != Greater &&
+		comparator != GreaterEq && comparator != Less && comparator != LessEq {
+		ret := s.Empty()
+		ret.Err = fmt.Errorf("unknown comparator: %v", comparator)
+		return ret
 	}
+
+	bools := make([]bool, s.Len())
 
 	// Single element comparison
 	if comp.Len() == 1 {
 		for i := 0; i < s.Len(); i++ {
-			e := s.elements.Elem(i)
-			c, err := compareElements(e, comp.elements.Elem(0), comparator)
-			if err != nil {
-				s = s.Empty()
-				s.Err = err
-				return s
-			}
-			bools[i] = c
+			bools[i] = compareRows(s, i, comp, 0, comparator)
 		}
 		return Bools(bools)
 	}
 
 	// Multiple element comparison
 	if s.Len() != comp.Len() {
-		s := s.Empty()
-		s.Err = fmt.Errorf("can't compare: length mismatch")
-		return s
+		ret := s.Empty()
+		ret.Err = fmt.Errorf("can't compare: length mismatch")
+		return ret
 	}
 	for i := 0; i < s.Len(); i++ {
-		e := s.elements.Elem(i)
-		c, err := compareElements(e, comp.elements.Elem(i), comparator)
-		if err != nil {
-			s = s.Empty()
-			s.Err = err
-			return s
-		}
-		bools[i] = c
+		bools[i] = compareRows(s, i, comp, i, comparator)
 	}
 	return Bools(bools)
 }
 
+// valuesEqual reports whether a[ai] and b[bi] are equal; missing values are
+// never equal. Both Series must hold the same type.
+func valuesEqual(a Series, ai int, b Series, bi int) bool {
+	if a.IsNA(ai) || b.IsNA(bi) {
+		return false
+	}
+	switch a.t {
+	case Int:
+		return a.elements.(intElements).data[ai] == b.elements.(intElements).data[bi]
+	case Float:
+		return a.elements.(floatElements).data[ai] == b.elements.(floatElements).data[bi]
+	case String:
+		return a.elements.(stringElements).data[ai] == b.elements.(stringElements).data[bi]
+	case Bool:
+		return a.elements.(boolElements).data[ai] == b.elements.(boolElements).data[bi]
+	case Time:
+		return a.elements.(timeElements).data[ai].Equal(b.elements.(timeElements).data[bi])
+	}
+	return false
+}
+
+// compareRows applies comparator to a[ai] vs b[bi] on same-type Series. Any
+// missing operand makes every comparison false, matching v1 semantics.
+func compareRows(a Series, ai int, b Series, bi int, comparator Comparator) bool {
+	if a.IsNA(ai) || b.IsNA(bi) {
+		return false
+	}
+	switch a.t {
+	case Int:
+		x := a.elements.(intElements).data[ai]
+		y := b.elements.(intElements).data[bi]
+		switch comparator {
+		case Eq:
+			return x == y
+		case Neq:
+			return x != y
+		case Greater:
+			return x > y
+		case GreaterEq:
+			return x >= y
+		case Less:
+			return x < y
+		case LessEq:
+			return x <= y
+		}
+	case Float:
+		x := a.elements.(floatElements).data[ai]
+		y := b.elements.(floatElements).data[bi]
+		switch comparator {
+		case Eq:
+			return x == y
+		case Neq:
+			return x != y
+		case Greater:
+			return x > y
+		case GreaterEq:
+			return x >= y
+		case Less:
+			return x < y
+		case LessEq:
+			return x <= y
+		}
+	case String:
+		x := a.elements.(stringElements).data[ai]
+		y := b.elements.(stringElements).data[bi]
+		switch comparator {
+		case Eq:
+			return x == y
+		case Neq:
+			return x != y
+		case Greater:
+			return x > y
+		case GreaterEq:
+			return x >= y
+		case Less:
+			return x < y
+		case LessEq:
+			return x <= y
+		}
+	case Bool:
+		x := a.elements.(boolElements).data[ai]
+		y := b.elements.(boolElements).data[bi]
+		switch comparator {
+		case Eq:
+			return x == y
+		case Neq:
+			return x != y
+		case Greater:
+			return x && !y
+		case GreaterEq:
+			return x || !y
+		case Less:
+			return !x && y
+		case LessEq:
+			return !x || y
+		}
+	case Time:
+		x := a.elements.(timeElements).data[ai]
+		y := b.elements.(timeElements).data[bi]
+		switch comparator {
+		case Eq:
+			return x.Equal(y)
+		case Neq:
+			return !x.Equal(y)
+		case Greater:
+			return x.After(y)
+		case GreaterEq:
+			return x.After(y) || x.Equal(y)
+		case Less:
+			return x.Before(y)
+		case LessEq:
+			return x.Before(y) || x.Equal(y)
+		}
+	}
+	return false
+}
+
 // Copy will return a copy of the Series.
 func (s Series) Copy() Series {
-	name := s.Name
-	t := s.t
-	err := s.Err
-	var elements Elements
-	switch s.t {
-	case String:
-		elements = make(stringElements, s.Len())
-		copy(elements.(stringElements), s.elements.(stringElements))
-	case Float:
-		elements = make(floatElements, s.Len())
-		copy(elements.(floatElements), s.elements.(floatElements))
-	case Bool:
-		elements = make(boolElements, s.Len())
-		copy(elements.(boolElements), s.elements.(boolElements))
-	case Int:
-		elements = make(intElements, s.Len())
-		copy(elements.(intElements), s.elements.(intElements))
-	case Time:
-		elements = make(timeElements, s.Len())
-		copy(elements.(timeElements), s.elements.(timeElements))
+	if s.elements == nil {
+		return Series{Name: s.Name, t: s.t, Err: s.Err}
 	}
-	ret := Series{
-		Name:     name,
-		t:        t,
-		elements: elements,
-		Err:      err,
+	return Series{
+		Name:     s.Name,
+		t:        s.t,
+		elements: s.elements.cloneStore(),
+		Err:      s.Err,
 	}
-	return ret
 }
 
 // Records returns the elements of a Series as a []string
 func (s Series) Records() []string {
 	ret := make([]string, s.Len())
-	for i := 0; i < s.Len(); i++ {
-		e := s.elements.Elem(i)
-		ret[i] = e.String()
+	for i := range ret {
+		ret[i] = s.Record(i)
 	}
 	return ret
 }
@@ -733,9 +681,8 @@ func (s Series) Records() []string {
 // NaN.
 func (s Series) Float() []float64 {
 	ret := make([]float64, s.Len())
-	for i := 0; i < s.Len(); i++ {
-		e := s.elements.Elem(i)
-		ret[i] = e.Float()
+	for i := range ret {
+		ret[i] = s.FloatAt(i)
 	}
 	return ret
 }
@@ -744,9 +691,8 @@ func (s Series) Float() []float64 {
 // transformation is not possible.
 func (s Series) Int() ([]int, error) {
 	ret := make([]int, s.Len())
-	for i := 0; i < s.Len(); i++ {
-		e := s.elements.Elem(i)
-		val, err := e.Int()
+	for i := range ret {
+		val, err := s.IntAt(i)
 		if err != nil {
 			return nil, err
 		}
@@ -757,9 +703,8 @@ func (s Series) Int() ([]int, error) {
 
 func (s Series) Int64() []int64 {
 	ret := make([]int64, s.Len())
-	for i := 0; i < s.Len(); i++ {
-		e := s.elements.Elem(i)
-		val, err := e.Int64()
+	for i := range ret {
+		val, err := s.Int64At(i)
 		if err != nil {
 			ret[i] = 0
 		} else {
@@ -773,9 +718,8 @@ func (s Series) Int64() []int64 {
 // transformation is not possible.
 func (s Series) Bool() ([]bool, error) {
 	ret := make([]bool, s.Len())
-	for i := 0; i < s.Len(); i++ {
-		e := s.elements.Elem(i)
-		val, err := e.Bool()
+	for i := range ret {
+		val, err := s.BoolAt(i)
 		if err != nil {
 			return nil, err
 		}
@@ -794,12 +738,12 @@ func (s Series) Len() int {
 	if s.elements == nil {
 		return 0
 	}
-	return s.elements.Len()
+	return s.elements.storeLen()
 }
 
 // String implements the Stringer interface for Series
 func (s Series) String() string {
-	return fmt.Sprint(s.elements)
+	return fmt.Sprint(s.Records())
 }
 
 // Str prints some extra information about a given series
@@ -815,24 +759,6 @@ func (s Series) Str() string {
 		ret = append(ret, "Values: "+fmt.Sprint(s))
 	}
 	return strings.Join(ret, "\n")
-}
-
-// Val returns the value of a series for the given index. Will panic if the index
-// is out of bounds.
-func (s Series) Val(i int) interface{} {
-	if s.elements == nil {
-		return nil
-	}
-	return s.elements.Elem(i).Val()
-}
-
-// Elem returns the element of a series for the given index. Will panic if the
-// index is out of bounds.
-func (s Series) Elem(i int) Element {
-	if s.elements == nil {
-		return nil
-	}
-	return s.elements.Elem(i)
 }
 
 // parseIndexes will parse the given indexes for a given series of length `l`. No
@@ -889,140 +815,179 @@ func ParseIndexes(l int, indexes Indexes) ([]int, error) {
 // Order returns the indexes for sorting a Series. NaN elements are pushed to the
 // end by order of appearance.
 func (s Series) Order(reverse bool) []int {
-	var ie indexedElements
+	n := s.Len()
+	valid := make([]int, 0, n)
 	var nasIdx []int
-	for i := 0; i < s.Len(); i++ {
-		e := s.elements.Elem(i)
-		if e.IsNA() {
+	for i := 0; i < n; i++ {
+		if s.IsNA(i) {
 			nasIdx = append(nasIdx, i)
 		} else {
-			ie = append(ie, indexedElement{i, e})
+			valid = append(valid, i)
 		}
 	}
-	var srt sort.Interface
-	srt = ie
+	less := orderLessFunc(s)
 	if reverse {
-		srt = sort.Reverse(srt)
+		sort.SliceStable(valid, func(a, b int) bool {
+			return less(valid[b], valid[a])
+		})
+	} else {
+		sort.SliceStable(valid, func(a, b int) bool {
+			return less(valid[a], valid[b])
+		})
 	}
-	sort.Stable(srt)
-	var ret []int
-	for _, e := range ie {
-		ret = append(ret, e.index)
-	}
-	return append(ret, nasIdx...)
+	return append(valid, nasIdx...)
 }
 
-type indexedElement struct {
-	index   int
-	element Element
+// orderLessFunc returns a typed row-comparison closure for sorting; it is
+// only called on valid rows.
+func orderLessFunc(s Series) func(i, j int) bool {
+	switch elems := s.elements.(type) {
+	case intElements:
+		return func(i, j int) bool { return elems.data[i] < elems.data[j] }
+	case floatElements:
+		return func(i, j int) bool { return elems.data[i] < elems.data[j] }
+	case stringElements:
+		return func(i, j int) bool { return elems.data[i] < elems.data[j] }
+	case boolElements:
+		return func(i, j int) bool { return !elems.data[i] && elems.data[j] }
+	case timeElements:
+		return func(i, j int) bool { return elems.data[i].Before(elems.data[j]) }
+	}
+	return func(i, j int) bool { return false }
 }
-
-type indexedElements []indexedElement
-
-func (e indexedElements) Len() int           { return len(e) }
-func (e indexedElements) Less(i, j int) bool { return e[i].element.Less(e[j].element) }
-func (e indexedElements) Swap(i, j int)      { e[i], e[j] = e[j], e[i] }
 
 // StdDev calculates the standard deviation of a series
 func (s Series) StdDev() float64 {
-	stdDev := stat.StdDev(s.Float(), nil)
-	return stdDev
+	return stat.StdDev(s.Float(), nil)
 }
 
-// Mean calculates the average value of a series
+// Mean calculates the average value of a series. Float columns walk the
+// buffer directly without materializing a []float64 copy; NaN values
+// propagate, matching the v1 behavior through Float().
 func (s Series) Mean() float64 {
-	stdDev := stat.Mean(s.Float(), nil)
-	return stdDev
+	if s.Len() == 0 {
+		return math.NaN()
+	}
+	switch elems := s.elements.(type) {
+	case floatElements:
+		if elems.validity == nil {
+			return stat.Mean(elems.data, nil)
+		}
+		return math.NaN()
+	case intElements:
+		if elems.validity != nil {
+			return math.NaN()
+		}
+		var sum float64
+		for _, v := range elems.data {
+			sum += float64(v)
+		}
+		return sum / float64(len(elems.data))
+	default:
+		var sum float64
+		for i := 0; i < s.Len(); i++ {
+			sum += s.FloatAt(i)
+		}
+		return sum / float64(s.Len())
+	}
 }
 
 // Median calculates the middle or median value, as opposed to
 // mean, and there is less susceptible to being affected by outliers.
 func (s Series) Median() float64 {
-	if s.elements.Len() == 0 ||
+	if s.Len() == 0 ||
 		s.Type() == String ||
 		s.Type() == Bool {
 		return math.NaN()
 	}
-	ix := s.Order(false)
-	newElem := make([]Element, len(ix))
-
-	for newpos, oldpos := range ix {
-		newElem[newpos] = s.elements.Elem(oldpos)
-	}
-
+	ordered := s.Subset(s.Order(false))
+	n := ordered.Len()
 	// When length is odd, we just take length(list)/2
 	// value as the median.
-	if len(newElem)%2 != 0 {
-		return newElem[len(newElem)/2].Float()
+	if n%2 != 0 {
+		return ordered.FloatAt(n / 2)
 	}
 	// When length is even, we take middle two elements of
 	// list and the median is an average of the two of them.
-	return (newElem[(len(newElem)/2)-1].Float() +
-		newElem[len(newElem)/2].Float()) * 0.5
+	return (ordered.FloatAt(n/2-1) + ordered.FloatAt(n/2)) * 0.5
 }
 
-// Max return the biggest element in the series
+// Max return the biggest element in the series. A missing first element keeps
+// the result NaN, matching v1 behavior.
 func (s Series) Max() float64 {
-	if s.elements.Len() == 0 || s.Type() == String {
+	if s.Len() == 0 || s.Type() == String {
 		return math.NaN()
 	}
-
-	max := s.elements.Elem(0)
-	for i := 1; i < s.elements.Len(); i++ {
-		elem := s.elements.Elem(i)
-		if elem.Greater(max) {
-			max = elem
+	if s.IsNA(0) {
+		return math.NaN()
+	}
+	max := s.FloatAt(0)
+	for i := 1; i < s.Len(); i++ {
+		if !s.IsNA(i) {
+			if v := s.FloatAt(i); v > max {
+				max = v
+			}
 		}
 	}
-	return max.Float()
+	return max
 }
 
 // MaxStr return the biggest element in a series of type String
 func (s Series) MaxStr() string {
-	if s.elements.Len() == 0 || s.Type() != String {
+	if s.Len() == 0 || s.Type() != String {
 		return ""
 	}
-
-	max := s.elements.Elem(0)
-	for i := 1; i < s.elements.Len(); i++ {
-		elem := s.elements.Elem(i)
-		if elem.Greater(max) {
-			max = elem
+	if s.IsNA(0) {
+		return "NaN"
+	}
+	max := s.Record(0)
+	for i := 1; i < s.Len(); i++ {
+		if !s.IsNA(i) {
+			if v := s.Record(i); v > max {
+				max = v
+			}
 		}
 	}
-	return max.String()
+	return max
 }
 
-// Min return the lowest element in the series
+// Min return the lowest element in the series. A missing first element keeps
+// the result NaN, matching v1 behavior.
 func (s Series) Min() float64 {
-	if s.elements.Len() == 0 || s.Type() == String {
+	if s.Len() == 0 || s.Type() == String {
 		return math.NaN()
 	}
-
-	min := s.elements.Elem(0)
-	for i := 1; i < s.elements.Len(); i++ {
-		elem := s.elements.Elem(i)
-		if elem.Less(min) {
-			min = elem
+	if s.IsNA(0) {
+		return math.NaN()
+	}
+	min := s.FloatAt(0)
+	for i := 1; i < s.Len(); i++ {
+		if !s.IsNA(i) {
+			if v := s.FloatAt(i); v < min {
+				min = v
+			}
 		}
 	}
-	return min.Float()
+	return min
 }
 
 // MinStr return the lowest element in a series of type String
 func (s Series) MinStr() string {
-	if s.elements.Len() == 0 || s.Type() != String {
+	if s.Len() == 0 || s.Type() != String {
 		return ""
 	}
-
-	min := s.elements.Elem(0)
-	for i := 1; i < s.elements.Len(); i++ {
-		elem := s.elements.Elem(i)
-		if elem.Less(min) {
-			min = elem
+	if s.IsNA(0) {
+		return "NaN"
+	}
+	min := s.Record(0)
+	for i := 1; i < s.Len(); i++ {
+		if !s.IsNA(i) {
+			if v := s.Record(i); v < min {
+				min = v
+			}
 		}
 	}
-	return min.String()
+	return min
 }
 
 // Quantile returns the sample of x such that x is greater than or
@@ -1038,32 +1003,36 @@ func (s Series) Quantile(p float64) float64 {
 	return stat.Quantile(p, stat.Empirical, ordered, nil)
 }
 
-// Map applies a function matching MapFunction signature, which itself
-// allowing for a fairly flexible MAP implementation, intended for mapping
-// the function over each element in Series and returning a new Series object.
-// Function must be compatible with the underlying type of data in the Series.
-// In other words it is expected that when working with a Float Series, that
-// the function passed in via argument `f` will not expect another type, but
-// instead expects to handle Element(s) of type Float.
-func (s Series) Map(f MapFunction) Series {
-	mappedValues := make([]Element, s.Len())
-	for i := 0; i < s.Len(); i++ {
-		value := f(s.elements.Elem(i))
-		mappedValues[i] = value
-	}
-	return New(mappedValues, s.Type(), s.Name)
-}
-
 // Sum calculates the sum value of a series
 func (s Series) Sum() float64 {
-	if s.elements.Len() == 0 || s.Type() == String || s.Type() == Bool {
+	if s.Len() == 0 || s.Type() == String || s.Type() == Bool {
 		return math.NaN()
 	}
 	var sum float64
-	for i := 0; i < s.Len(); i++ {
-		e := s.elements.Elem(i)
-		if !e.IsNA() {
-			sum += e.Float()
+	switch elems := s.elements.(type) {
+	case floatElements:
+		for i, v := range elems.data {
+			if elems.isValid(i) {
+				sum += v
+			}
+		}
+	case intElements:
+		for i, v := range elems.data {
+			if elems.isValid(i) {
+				sum += float64(v)
+			}
+		}
+	case timeElements:
+		for i, v := range elems.data {
+			if elems.isValid(i) {
+				sum += float64(v.Unix())
+			}
+		}
+	default:
+		for i := 0; i < s.Len(); i++ {
+			if !s.IsNA(i) {
+				sum += s.FloatAt(i)
+			}
 		}
 	}
 	return sum
@@ -1094,7 +1063,7 @@ func (s Series) Slice(j, k int) Series {
 func (s Series) ValueCounts() map[string]int {
 	counts := make(map[string]int, s.Len())
 	for i := 0; i < s.Len(); i++ {
-		counts[s.Elem(i).String()]++
+		counts[s.Record(i)]++
 	}
 	return counts
 }
@@ -1105,7 +1074,7 @@ func (s Series) Unique() Series {
 	seen := make(map[string]struct{}, s.Len())
 	var idxs []int
 	for i := 0; i < s.Len(); i++ {
-		key := s.Elem(i).String()
+		key := s.Record(i)
 		if _, ok := seen[key]; !ok {
 			seen[key] = struct{}{}
 			idxs = append(idxs, i)
@@ -1118,11 +1087,10 @@ func (s Series) Unique() Series {
 func (s Series) NUnique() int {
 	seen := make(map[string]struct{}, s.Len())
 	for i := 0; i < s.Len(); i++ {
-		elem := s.Elem(i)
-		if elem.IsNA() {
+		if s.IsNA(i) {
 			continue
 		}
-		seen[elem.String()] = struct{}{}
+		seen[s.Record(i)] = struct{}{}
 	}
 	return len(seen)
 }
@@ -1134,12 +1102,11 @@ func (s Series) CumSum() Series {
 	var cum float64
 	hasNaN := false
 	for i := 0; i < s.Len(); i++ {
-		elem := s.Elem(i)
-		if elem.IsNA() || hasNaN {
+		if s.IsNA(i) || hasNaN {
 			hasNaN = true
 			result.Append(math.NaN())
 		} else {
-			cum += elem.Float()
+			cum += s.FloatAt(i)
 			result.Append(cum)
 		}
 	}
@@ -1152,12 +1119,11 @@ func (s Series) CumProd() Series {
 	cum := 1.0
 	hasNaN := false
 	for i := 0; i < s.Len(); i++ {
-		elem := s.Elem(i)
-		if elem.IsNA() || hasNaN {
+		if s.IsNA(i) || hasNaN {
 			hasNaN = true
 			result.Append(math.NaN())
 		} else {
-			cum *= elem.Float()
+			cum *= s.FloatAt(i)
 			result.Append(cum)
 		}
 	}
@@ -1169,11 +1135,10 @@ func (s Series) CumMax() Series {
 	result := newFloatSeries(s.Name, s.Len())
 	curMax := math.NaN()
 	for i := 0; i < s.Len(); i++ {
-		elem := s.Elem(i)
-		if elem.IsNA() {
+		if s.IsNA(i) {
 			result.Append(math.NaN())
 		} else {
-			v := elem.Float()
+			v := s.FloatAt(i)
 			if math.IsNaN(curMax) || v > curMax {
 				curMax = v
 			}
@@ -1188,11 +1153,10 @@ func (s Series) CumMin() Series {
 	result := newFloatSeries(s.Name, s.Len())
 	curMin := math.NaN()
 	for i := 0; i < s.Len(); i++ {
-		elem := s.Elem(i)
-		if elem.IsNA() {
+		if s.IsNA(i) {
 			result.Append(math.NaN())
 		} else {
-			v := elem.Float()
+			v := s.FloatAt(i)
 			if math.IsNaN(curMin) || v < curMin {
 				curMin = v
 			}
@@ -1214,12 +1178,10 @@ func (s Series) Diff(periods int) Series {
 			result.Append(math.NaN())
 			continue
 		}
-		cur := s.Elem(i)
-		prev := s.Elem(j)
-		if cur.IsNA() || prev.IsNA() {
+		if s.IsNA(i) || s.IsNA(j) {
 			result.Append(math.NaN())
 		} else {
-			result.Append(cur.Float() - prev.Float())
+			result.Append(s.FloatAt(i) - s.FloatAt(j))
 		}
 	}
 	return result
@@ -1236,61 +1198,15 @@ func (s Series) PctChange(periods int) Series {
 			result.Append(math.NaN())
 			continue
 		}
-		cur := s.Elem(i)
-		prev := s.Elem(j)
-		if cur.IsNA() || prev.IsNA() {
+		if s.IsNA(i) || s.IsNA(j) {
 			result.Append(math.NaN())
 			continue
 		}
-		prevVal := prev.Float()
+		prevVal := s.FloatAt(j)
 		if prevVal == 0 {
 			result.Append(math.NaN())
 		} else {
-			result.Append((cur.Float() - prevVal) / math.Abs(prevVal))
-		}
-	}
-	return result
-}
-
-// FillNaNForwardLimit fills NaN values with the most recent non-NaN value,
-// but only for up to `limit` consecutive NaN positions.
-// limit <= 0 means no limit (equivalent to FillNaNForward).
-func (s Series) FillNaNForwardLimit(limit int) Series {
-	result := s.Copy()
-	var lastVal interface{}
-	streak := 0
-	for i := 0; i < result.Len(); i++ {
-		elem := result.Elem(i)
-		if elem.IsNA() {
-			streak++
-			if lastVal != nil && (limit <= 0 || streak <= limit) {
-				elem.Set(lastVal)
-			}
-		} else {
-			lastVal = elem.Val()
-			streak = 0
-		}
-	}
-	return result
-}
-
-// FillNaNBackwardLimit fills NaN values with the nearest following non-NaN value,
-// but only for up to `limit` consecutive NaN positions.
-// limit <= 0 means no limit (equivalent to FillNaNBackward).
-func (s Series) FillNaNBackwardLimit(limit int) Series {
-	result := s.Copy()
-	var nextVal interface{}
-	streak := 0
-	for i := result.Len() - 1; i >= 0; i-- {
-		elem := result.Elem(i)
-		if elem.IsNA() {
-			streak++
-			if nextVal != nil && (limit <= 0 || streak <= limit) {
-				elem.Set(nextVal)
-			}
-		} else {
-			nextVal = elem.Val()
-			streak = 0
+			result.Append((s.FloatAt(i) - prevVal) / math.Abs(prevVal))
 		}
 	}
 	return result
@@ -1306,12 +1222,10 @@ func (s Series) Corr(other Series) float64 {
 	var sumX, sumY, sumXY, sumX2, sumY2 float64
 	count := 0
 	for i := 0; i < n; i++ {
-		a := s.Elem(i)
-		b := other.Elem(i)
-		if a.IsNA() || b.IsNA() {
+		if s.IsNA(i) || other.IsNA(i) {
 			continue
 		}
-		x, y := a.Float(), b.Float()
+		x, y := s.FloatAt(i), other.FloatAt(i)
 		sumX += x
 		sumY += y
 		sumXY += x * y
@@ -1341,12 +1255,10 @@ func (s Series) Cov(other Series) float64 {
 	var sumX, sumY, sumXY float64
 	count := 0
 	for i := 0; i < n; i++ {
-		a := s.Elem(i)
-		b := other.Elem(i)
-		if a.IsNA() || b.IsNA() {
+		if s.IsNA(i) || other.IsNA(i) {
 			continue
 		}
-		x, y := a.Float(), b.Float()
+		x, y := s.FloatAt(i), other.FloatAt(i)
 		sumX += x
 		sumY += y
 		sumXY += x * y
@@ -1359,59 +1271,56 @@ func (s Series) Cov(other Series) float64 {
 	return (sumXY - sumX*sumY/fc) / (fc - 1)
 }
 
-// StringsDirect constructs a String Series by directly wrapping the provided
-// slice without copying each element through Set(). The caller must not modify
-// the input slice after this call. This is faster than Strings() for large
-// pre-built slices.
+// StringsDirect constructs a String Series by copying the provided slice into
+// a column buffer. The "NaN" sentinel string becomes a missing value.
 func StringsDirect(values []string) Series {
-	elems := make(stringElements, len(values))
+	data := make([]string, len(values))
+	copy(data, values)
+	col := stringElements{data: data}
 	for i, v := range values {
 		if v == "NaN" {
-			elems[i] = stringElement{"", true}
-		} else {
-			elems[i] = stringElement{v, false}
+			col.setNA(i)
 		}
 	}
-	return Series{t: String, elements: elems}
+	return Series{t: String, elements: col}
 }
 
-// FloatsDirect constructs a Float Series by directly wrapping the provided
-// slice without per-element interface dispatch. Faster than Floats() for large
-// pre-built slices.
+// FloatsDirect constructs a Float Series by copying the provided slice into
+// a column buffer. NaN payloads become missing values.
 func FloatsDirect(values []float64) Series {
-	elems := make(floatElements, len(values))
+	data := make([]float64, len(values))
+	copy(data, values)
+	col := floatElements{data: data}
 	for i, v := range values {
-		elems[i] = floatElement{e: v, nan: v != v}
+		if v != v {
+			col.setNA(i)
+		}
 	}
-	return Series{t: Float, elements: elems}
+	return Series{t: Float, elements: col}
 }
 
-// IntsDirect constructs an Int Series without per-element interface dispatch.
-// The caller must not rely on mutations to values being reflected in the Series.
+// IntsDirect constructs an Int Series by copying the provided slice into a
+// column buffer.
 func IntsDirect(values []int) Series {
-	elems := make(intElements, len(values))
+	data := make([]int64, len(values))
 	for i, v := range values {
-		elems[i] = intElement{e: int64(v), nan: false}
+		data[i] = int64(v)
 	}
-	return Series{t: Int, elements: elems}
+	return Series{t: Int, elements: intElements{data: data}}
 }
 
-// BoolsDirect constructs a Bool Series without per-element interface dispatch.
-// The caller must not rely on mutations to values being reflected in the Series.
+// BoolsDirect constructs a Bool Series by copying the provided slice into a
+// column buffer.
 func BoolsDirect(values []bool) Series {
-	elems := make(boolElements, len(values))
-	for i, v := range values {
-		elems[i] = boolElement{e: v, nan: false}
-	}
-	return Series{t: Bool, elements: elems}
+	data := make([]bool, len(values))
+	copy(data, values)
+	return Series{t: Bool, elements: boolElements{data: data}}
 }
 
-// TimesDirect constructs a Time Series without per-element interface dispatch.
-// The caller must not rely on mutations to values being reflected in the Series.
+// TimesDirect constructs a Time Series by copying the provided slice into a
+// column buffer.
 func TimesDirect(values []time.Time) Series {
-	elems := make(timeElements, len(values))
-	for i, v := range values {
-		elems[i] = timeElement{e: v, nan: false}
-	}
-	return Series{t: Time, elements: elems}
+	data := make([]time.Time, len(values))
+	copy(data, values)
+	return Series{t: Time, elements: timeElements{data: data}}
 }

@@ -27,7 +27,7 @@ func TestEWM_Var_PandasCompat(t *testing.T) {
 		t.Fatalf("EWM Var len: got %d want %d", got.Len(), len(want))
 	}
 	for i := range want {
-		v := got.Elem(i).Float()
+		v := got.FloatAt(i)
 		if math.IsNaN(want[i]) {
 			if !math.IsNaN(v) {
 				t.Errorf("EWM Var[%d]: got %v want NaN", i, v)
@@ -41,8 +41,8 @@ func TestEWM_Var_PandasCompat(t *testing.T) {
 	// Std = sqrt(Var) must be consistent.
 	std := s.EWM(3).Std()
 	for i := 1; i < got.Len(); i++ {
-		wantStd := math.Sqrt(got.Elem(i).Float())
-		gotStd := std.Elem(i).Float()
+		wantStd := math.Sqrt(got.FloatAt(i))
+		gotStd := std.FloatAt(i)
 		if math.Abs(gotStd-wantStd) > 1e-9 {
 			t.Errorf("EWM Std[%d]: got %v want %v", i, gotStd, wantStd)
 		}
@@ -69,7 +69,7 @@ func TestDataFrame_Sample_RowOrder(t *testing.T) {
 	// Collect sampled indexes.
 	vals := make([]int, 5)
 	for i := range vals {
-		v, _ := out.Col("idx").Elem(i).Int()
+		v, _ := out.Col("idx").IntAt(i)
 		vals[i] = v
 	}
 	want := []int{9, 4, 2, 6, 8}
@@ -168,11 +168,11 @@ func TestReadXLSX_WithSheet(t *testing.T) {
 	if got.Ncol() != 2 {
 		t.Fatalf("ReadXLSX WithSheet cols: got %d want 2", got.Ncol())
 	}
-	if got.Col("name").Elem(0).String() != "sheet2" {
-		t.Errorf("ReadXLSX WithSheet name: got %s want sheet2", got.Col("name").Elem(0).String())
+	if got.Col("name").Record(0) != "sheet2" {
+		t.Errorf("ReadXLSX WithSheet name: got %s want sheet2", got.Col("name").Record(0))
 	}
-	if got.Col("value").Elem(0).String() != "42" {
-		t.Errorf("ReadXLSX WithSheet value: got %s want 42", got.Col("value").Elem(0).String())
+	if got.Col("value").Record(0) != "42" {
+		t.Errorf("ReadXLSX WithSheet value: got %s want 42", got.Col("value").Record(0))
 	}
 }
 
@@ -280,10 +280,10 @@ func TestDataFrame_Resample_Monthly(t *testing.T) {
 		t.Fatalf("Resample monthly rows: got %d want 2", result.Nrow())
 	}
 	// Sorted by period: 2024-01 first.
-	if result.Col("period").Elem(0).String() != "2024-01" {
-		t.Errorf("Resample period[0]: got %s want 2024-01", result.Col("period").Elem(0).String())
+	if result.Col("period").Record(0) != "2024-01" {
+		t.Errorf("Resample period[0]: got %s want 2024-01", result.Col("period").Record(0))
 	}
-	janSum := result.Col("revenue_SUM").Elem(0).Float()
+	janSum := result.Col("revenue_SUM").FloatAt(0)
 	if !compareFloats(janSum, 30.0, 9) {
 		t.Errorf("Resample Jan sum: got %v want 30", janSum)
 	}
@@ -339,8 +339,8 @@ func TestDataFrame_Unstack(t *testing.T) {
 		t.Fatalf("Unstack cols: got %d want 3", wide.Ncol())
 	}
 	// id=1, q1=10
-	if wide.Col("q1").Elem(0).String() != "10" {
-		t.Errorf("Unstack q1[0]: got %s want 10", wide.Col("q1").Elem(0).String())
+	if wide.Col("q1").Record(0) != "10" {
+		t.Errorf("Unstack q1[0]: got %s want 10", wide.Col("q1").Record(0))
 	}
 }
 

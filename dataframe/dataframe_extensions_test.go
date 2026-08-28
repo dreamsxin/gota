@@ -17,7 +17,7 @@ func dfColFloats(df DataFrame, col string) []float64 {
 	s := df.Col(col)
 	out := make([]float64, s.Len())
 	for i := range out {
-		out[i] = s.Elem(i).Float()
+		out[i] = s.FloatAt(i)
 	}
 	return out
 }
@@ -174,12 +174,12 @@ func TestDataFrame_Corr(t *testing.T) {
 	if aaIdx < 0 {
 		t.Fatal("Corr: column A not found in result")
 	}
-	aaVal := corrDF.Col("A").Elem(0).Float()
+	aaVal := corrDF.Col("A").FloatAt(0)
 	if !compareFloats(aaVal, 1.0, 10) {
 		t.Errorf("Corr A-A: got %v, want 1.0", aaVal)
 	}
 	// A-B = -1.0
-	abVal := corrDF.Col("B").Elem(0).Float()
+	abVal := corrDF.Col("B").FloatAt(0)
 	if !compareFloats(abVal, -1.0, 10) {
 		t.Errorf("Corr A-B: got %v, want -1.0", abVal)
 	}
@@ -195,12 +195,12 @@ func TestDataFrame_Cov(t *testing.T) {
 		t.Fatal(covDF.Err)
 	}
 	// Var(A) = 2.5 (sample)
-	aaVal := covDF.Col("A").Elem(0).Float()
+	aaVal := covDF.Col("A").FloatAt(0)
 	if !compareFloats(aaVal, 2.5, 6) {
 		t.Errorf("Cov A-A: got %v, want 2.5", aaVal)
 	}
 	// Cov(A,B) = Var(A) since A==B
-	abVal := covDF.Col("B").Elem(0).Float()
+	abVal := covDF.Col("B").FloatAt(0)
 	if !compareFloats(abVal, 2.5, 6) {
 		t.Errorf("Cov A-B: got %v, want 2.5", abVal)
 	}
@@ -325,7 +325,7 @@ func TestGroups_Transform(t *testing.T) {
 	transformed, err := g.Transform("val", func(s series.Series) series.Series {
 		var sum float64
 		for i := 0; i < s.Len(); i++ {
-			sum += s.Elem(i).Float()
+			sum += s.FloatAt(i)
 		}
 		mean := sum / float64(s.Len())
 		vals := make([]float64, s.Len())
@@ -343,7 +343,7 @@ func TestGroups_Transform(t *testing.T) {
 	}
 	vals := make([]float64, transformed.Len())
 	for i := range vals {
-		vals[i] = transformed.Elem(i).Float()
+		vals[i] = transformed.FloatAt(i)
 	}
 	sort.Float64s(vals)
 	// After sorting: [2, 2, 3, 3]

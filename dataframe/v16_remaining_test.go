@@ -2,78 +2,12 @@ package dataframe
 
 import (
 	"fmt"
-	"math"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/dreamsxin/gota/series"
 )
-
-// -----------------------------------------------------------------------
-// v1.4 — RapplyParallel
-// -----------------------------------------------------------------------
-
-func TestDataFrame_RapplyParallel(t *testing.T) {
-	df := New(
-		series.New([]float64{1, 2, 3, 4, 5}, series.Float, "A"),
-		series.New([]float64{10, 20, 30, 40, 50}, series.Float, "B"),
-	)
-	// Sum each row.
-	sumRow := func(s series.Series) series.Series {
-		var total float64
-		for i := 0; i < s.Len(); i++ {
-			total += s.Elem(i).Float()
-		}
-		return series.Floats(total)
-	}
-	seq := df.Rapply(sumRow)
-	par := df.RapplyParallel(sumRow)
-
-	if seq.Err != nil {
-		t.Fatal(seq.Err)
-	}
-	if par.Err != nil {
-		t.Fatal(par.Err)
-	}
-	if seq.Nrow() != par.Nrow() {
-		t.Fatalf("RapplyParallel rows: seq=%d par=%d", seq.Nrow(), par.Nrow())
-	}
-	// Values must match.
-	for i := 0; i < seq.Nrow(); i++ {
-		sv := seq.Elem(i, 0).Float()
-		pv := par.Elem(i, 0).Float()
-		if math.Abs(sv-pv) > 1e-9 {
-			t.Errorf("RapplyParallel[%d]: seq=%v par=%v", i, sv, pv)
-		}
-	}
-}
-
-func TestDataFrame_RapplyParallel_LargeDataset(t *testing.T) {
-	// Stress test with 1000 rows to exercise goroutine pool.
-	n := 1000
-	vals := make([]float64, n)
-	for i := range vals {
-		vals[i] = float64(i)
-	}
-	df := New(series.New(vals, series.Float, "x"))
-	double := func(s series.Series) series.Series {
-		v := s.Elem(0).Float()
-		return series.Floats(v * 2)
-	}
-	out := df.RapplyParallel(double)
-	if out.Err != nil {
-		t.Fatal(out.Err)
-	}
-	if out.Nrow() != n {
-		t.Fatalf("RapplyParallel large: rows=%d want %d", out.Nrow(), n)
-	}
-	// Spot-check last row.
-	last := out.Elem(n-1, 0).Float()
-	if !compareFloats(last, float64(n-1)*2, 9) {
-		t.Errorf("RapplyParallel large last: got %v want %v", last, float64(n-1)*2)
-	}
-}
 
 // -----------------------------------------------------------------------
 // v1.5 — WriteSQL named placeholders
@@ -211,7 +145,7 @@ func TestScanCSV_DetectDelimiter(t *testing.T) {
 	var names []string
 	err := ScanCSV(strings.NewReader(csv), 2, func(batch DataFrame) error {
 		for i := 0; i < batch.Nrow(); i++ {
-			names = append(names, batch.Col("name").Elem(i).String())
+			names = append(names, batch.Col("name").Record(i))
 		}
 		return nil
 	}, DetectDelimiter(true))

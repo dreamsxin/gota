@@ -2642,96 +2642,12 @@ func TestDataFrame_Show(t *testing.T) {
 	}
 }
 
-func TestDataFrame_Rapply(t *testing.T) {
-	a := LoadRecords(
-		[][]string{
-			{"A", "B", "C", "D"},
-			{"1", "4", "5.1", "1"},
-			{"1", "4", "6.0", "1"},
-			{"2", "3", "6.0", "0"},
-			{"2", "2", "7.1", "0"},
-		},
-	)
-	mean := func(s series.Series) series.Series {
-		floats := s.Float()
-		sum := 0.0
-		for _, f := range floats {
-			sum += f
-		}
-		ret := series.Floats(sum / float64(len(floats)))
-		return ret
-	}
-	sum := func(s series.Series) series.Series {
-		floats := s.Float()
-		sum := 0.0
-		for _, f := range floats {
-			sum += f
-		}
-		return series.Floats(sum)
-	}
-	table := []struct {
-		fun   func(series.Series) series.Series
-		expDf DataFrame
-	}{
-		{
-			mean,
-			LoadRecords(
-				[][]string{
-					{"X0"},
-					{"2.775"},
-					{"3"},
-					{"2.75"},
-					{"2.775"},
-				},
-				DefaultType(series.Float),
-				DetectTypes(false),
-			),
-		},
-		{
-			sum,
-			LoadRecords(
-				[][]string{
-					{"X0"},
-					{"11.1"},
-					{"12"},
-					{"11"},
-					{"11.1"},
-				},
-				DefaultType(series.Float),
-				DetectTypes(false),
-			),
-		},
-	}
-	for i, tc := range table {
-		b := a.Rapply(tc.fun)
-
-		if b.Err != nil {
-			t.Errorf("Test: %d\nError:%v", i, b.Err)
-		}
-		//if err := checkAddrDf(a, b); err != nil {
-		//t.Error(err)
-		//}
-		// Check that the types are the same between both DataFrames
-		if !reflect.DeepEqual(tc.expDf.Types(), b.Types()) {
-			t.Errorf("Test: %d\nDifferent types:\nA:%v\nB:%v", i, tc.expDf.Types(), b.Types())
-		}
-		// Check that the colnames are the same between both DataFrames
-		if !reflect.DeepEqual(tc.expDf.Names(), b.Names()) {
-			t.Errorf("Test: %d\nDifferent colnames:\nA:%v\nB:%v", i, tc.expDf.Names(), b.Names())
-		}
-		// Check that the values are the same between both DataFrames
-		if !reflect.DeepEqual(tc.expDf.Records(), b.Records()) {
-			t.Errorf("Test: %d\nDifferent values:\nA:%v\nB:%v", i, tc.expDf.Records(), b.Records())
-		}
-	}
-}
-
 type mockMatrix struct {
 	DataFrame
 }
 
 func (m mockMatrix) At(i, j int) float64 {
-	return m.columns[j].Elem(i).Float()
+	return m.columns[j].FloatAt(i)
 }
 
 func (m mockMatrix) T() Matrix {
@@ -3356,8 +3272,8 @@ func TestDataFrame_DropDuplicates(t *testing.T) {
 	// First occurrence kept: rows 0, 1, 3.
 	wantX := []string{"a", "b", "c"}
 	for i, exp := range wantX {
-		if got.Col("X").Elem(i).String() != exp {
-			t.Errorf("DropDuplicates row %d X: expected %s got %s", i, exp, got.Col("X").Elem(i).String())
+		if got.Col("X").Record(i) != exp {
+			t.Errorf("DropDuplicates row %d X: expected %s got %s", i, exp, got.Col("X").Record(i))
 		}
 	}
 }
@@ -3367,18 +3283,6 @@ func TestDataFrame_FilterAggregation_InvalidAggregation(t *testing.T) {
 	got := df.FilterAggregation(Aggregation(99), F{Colname: "x", Comparator: series.Eq, Comparando: 1})
 	if got.Err == nil {
 		t.Fatal("expected invalid aggregation to return an error")
-	}
-}
-
-func TestDataFrame_Rapply_UnsupportedTypeReturnsError(t *testing.T) {
-	df := DataFrame{
-		columns: []series.Series{{Name: "bad"}},
-		ncols:   1,
-		nrows:   1,
-	}
-	got := df.Rapply(func(s series.Series) series.Series { return s })
-	if got.Err == nil {
-		t.Fatal("expected unsupported row type to return an error")
 	}
 }
 
@@ -3392,8 +3296,8 @@ func TestDataFrame_FillNAStrategy(t *testing.T) {
 	ffill := df.FillNAStrategy(NAFillForward)
 	wantA := []string{"a", "a", "a", "d"}
 	for i, exp := range wantA {
-		if ffill.Col("A").Elem(i).String() != exp {
-			t.Errorf("ffill A[%d]: expected %s got %s", i, exp, ffill.Col("A").Elem(i).String())
+		if ffill.Col("A").Record(i) != exp {
+			t.Errorf("ffill A[%d]: expected %s got %s", i, exp, ffill.Col("A").Record(i))
 		}
 	}
 
@@ -3401,15 +3305,15 @@ func TestDataFrame_FillNAStrategy(t *testing.T) {
 	bfill := df.FillNAStrategy(NAFillBackward)
 	wantB := []string{"a", "d", "d", "d"}
 	for i, exp := range wantB {
-		if bfill.Col("A").Elem(i).String() != exp {
-			t.Errorf("bfill A[%d]: expected %s got %s", i, exp, bfill.Col("A").Elem(i).String())
+		if bfill.Col("A").Record(i) != exp {
+			t.Errorf("bfill A[%d]: expected %s got %s", i, exp, bfill.Col("A").Record(i))
 		}
 	}
 
 	// Subset: only fill column "A", "B" should remain unchanged.
 	ffillSubset := df.FillNAStrategy(NAFillForward, "A")
-	if ffillSubset.Col("B").Elem(1).String() != "NaN" {
-		t.Errorf("ffill subset: B[1] should still be NaN, got %s", ffillSubset.Col("B").Elem(1).String())
+	if ffillSubset.Col("B").Record(1) != "NaN" {
+		t.Errorf("ffill subset: B[1] should still be NaN, got %s", ffillSubset.Col("B").Record(1))
 	}
 }
 
@@ -3418,8 +3322,8 @@ func TestDataFrame_FillNaN(t *testing.T) {
 		series.New([]interface{}{"x", nil, "z"}, series.String, "A"),
 	)
 	filled := df.FillNaN("A", series.Strings("fill"))
-	if filled.Col("A").Elem(1).String() != "fill" {
-		t.Errorf("FillNaN: expected 'fill', got %s", filled.Col("A").Elem(1).String())
+	if filled.Col("A").Record(1) != "fill" {
+		t.Errorf("FillNaN: expected 'fill', got %s", filled.Col("A").Record(1))
 	}
 	// Non-existent column: FillNaN adds it as a new column (Mutate behaviour).
 	added := df.FillNaN("B", series.Strings("newval"))

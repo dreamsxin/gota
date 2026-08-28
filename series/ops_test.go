@@ -51,18 +51,18 @@ func TestSeries_Clip_NonNumeric(t *testing.T) {
 func TestSeries_Replace_String(t *testing.T) {
 	s := Strings([]string{"a", "N/A", "b", "N/A"})
 	got := s.Replace("N/A", nil)
-	if !got.Elem(1).IsNA() || !got.Elem(3).IsNA() {
+	if !got.IsNA(1) || !got.IsNA(3) {
 		t.Error("Replace: expected NaN at positions 1 and 3")
 	}
-	if got.Elem(0).String() != "a" {
-		t.Errorf("Replace: elem[0] should be 'a', got %s", got.Elem(0).String())
+	if got.Record(0) != "a" {
+		t.Errorf("Replace: elem[0] should be 'a', got %s", got.Record(0))
 	}
 }
 
 func TestSeries_Replace_Int(t *testing.T) {
 	s := Ints([]int{1, 0, 2, 0})
 	got := s.Replace(0, nil)
-	if !got.Elem(1).IsNA() || !got.Elem(3).IsNA() {
+	if !got.IsNA(1) || !got.IsNA(3) {
 		t.Error("Replace int: expected NaN at positions 1 and 3")
 	}
 }

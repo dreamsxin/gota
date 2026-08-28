@@ -244,28 +244,6 @@ func BenchmarkDataFrame_Subset(b *testing.B) {
 	}
 }
 
-func BenchmarkDataFrame_Elem(b *testing.B) {
-	data := dataframe.New(generateSeries(100000, 5)...)
-	table := []struct {
-		name string
-		data dataframe.DataFrame
-	}{
-		{
-			"100000x20_ALL",
-			data,
-		},
-	}
-	for _, test := range table {
-		b.Run(test.name, func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				for k := 0; k < 100000; k++ {
-					test.data.Elem(k, 0)
-				}
-			}
-		})
-	}
-}
-
 func BenchmarkDataFrame_GroupByAggregation(b *testing.B) {
 	n := 100000
 	keys := make([]string, n)

@@ -125,20 +125,24 @@ Design document: [docs/rfc-columnar-kernel.md](docs/rfc-columnar-kernel.md)
 string interning, byte-budget batch chunking, and Rapply removal decided in
 its §9). The measured v1 baseline it builds on, anchored by the committed
 benchmarks in `series/benchmarks_test.go`: 16 B/element numeric columns,
-4.9 ms + 8 MB alloc for a 1M-row Mean, 252 µs for a 100k-row Copy, 4.4 ms
-for a 1M-element `Elem(i).Float()` walk. This is a design milestone, not a
+4.9 ms + 8 MB alloc for a 1M-row Mean, 252 µs for a 100k-row Copy, and
+4.4 ms for a 1M-element `Elem(i).Float()` walk (measured before `Elem` was
+removed; the benchmark retired with it). This is a design milestone, not a
 collection of independent features.
 
 - [x] RFC reviewed and accepted (§9 decisions resolved: materialize + snapshot
   view with mandatory measurements, chain-local intern pool only with no
-  global pool, 1.5 GiB byte-budget batch splitting with no exceptions,
-  automatic threshold adjustment, or disk spill, Rapply deleted from the
-  kernel path at v2; the Int-vs-NaN semantics change activates with the /v2
-  module bump, not earlier).
-- [ ] Prototype contiguous typed buffers with a validity bitmap and batch
-  kernels, behind the current Series API.
-- [ ] Measure memory use and representative operations against the v1.2.1
-  element-based implementation.
+  global pool, 1.5 GiB byte-budget batch splitting with no exceptions and
+  neither automatic threshold adjustment nor disk spill, Rapply deleted from
+  the kernel path at v2; the Int-vs-NaN semantics change activates with the
+  /v2 module bump, not earlier).
+- [x] Prototype contiguous typed buffers with a validity bitmap and batch
+  kernels (landed on the `v2` branch as a clean break: buffers plus the
+  aggregate/compare/fill kernels replaced the element storage directly; see
+  Milestone 1 below).
+- [x] Measure memory use and representative operations against the v1.2.1
+  element-based implementation (Copy 100k Int: 252 µs / 1.6 MB → 90 µs /
+  0.8 MB; Mean 1M Float: 4.9 ms / 8 MB → 0.13 ms / 0 allocs).
 - [ ] Design Decimal and ordered Enum as logical DTypes on the same kernel.
 - [ ] Add Arrow import/export only after buffer ownership and validity semantics
   can support a documented zero-copy path.
@@ -154,15 +158,17 @@ release); v1.x receives fixes only until the tag. Breaking changes ship
 together in v2.0.0 and are enumerated in the CHANGELOG and a migration
 guide.
 
-- [ ] Milestone 1: column buffers behind the Series API, memory ~2x down,
-  no benchmark regression against the §1 baseline.
-- [ ] Milestone 2: batch kernels for aggregations, filters, sorting, joins,
-  with golden-output tests; `BatchTransform` registration.
+- [x] Milestone 1: column buffers behind the Series API, memory ~2x down,
+  benchmarks improved against the §1 baseline. Landed on the `v2` branch
+  with a scope decision: since compatibility is not an obligation, the
+  `Element`/`Elem` API and the `Rapply` family were removed in the same
+  step instead of Milestone 4.
+- [ ] Milestone 2: batch kernels for filters, sorting, joins, with
+  golden-output tests; `BatchTransform` registration.
 - [ ] Milestone 3: DType system; `Categorical` as the Dictionary DType;
   chain-local intern pool and byte-budget chunking.
 - [ ] Milestone 4: bump module path to `/v2`; split Excel/Parquet/SQL
-  adapters into submodules; remove `Element`/`Elem` and `Rapply` family;
-  Int columns distinguish 0 from missing.
+  adapters into submodules; Int columns distinguish 0 from missing.
 - [ ] Publish the CHANGELOG entry, migration guide, and tag v2.0.0.
 
 ## Research, Not Committed

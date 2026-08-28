@@ -8,6 +8,12 @@ and data wrangling methods for Go, inspired by pandas. Gota provides an eager Go
 API rather than pandas API parity. The API is still evolving, so review release
 notes when upgrading.
 
+Development note: the `v2` branch carries the columnar kernel (typed column
+buffers with validity bitmaps, see `docs/rfc-columnar-kernel.md`). It is a
+clean break: the `Element`/`Elem` API and the `Rapply` family are removed,
+replaced by typed Series accessors (`Val`, `IsNA`, `Record`, `FloatAt`,
+`IntAt`, `BoolAt`, `TimeAt`) and column-wise apply.
+
 ## Table of Contents
 
 - [Installation](#installation)
@@ -285,9 +291,9 @@ Built-in comparators: `Eq`, `Neq`, `Greater`, `GreaterEq`, `Less`, `LessEq`, `In
 Custom comparator with `series.CompFunc`:
 
 ```go
-hasPrefix := func(prefix string) func(series.Element) bool {
-    return func(el series.Element) bool {
-        if val, ok := el.Val().(string); ok {
+hasPrefix := func(prefix string) func(series.Series, int) bool {
+    return func(s series.Series, i int) bool {
+        if val, ok := s.Val(i).(string); ok {
             return strings.HasPrefix(val, prefix)
         }
         return false
@@ -394,7 +400,8 @@ mean := func(s series.Series) series.Series {
     return series.Floats(sum / float64(len(floats)))
 }
 df.Capply(mean) // column-wise
-df.Rapply(mean) // row-wise
+// Row-wise apply (Rapply) was removed in v2; express row logic as
+// column-wise operations or Mutate instead.
 ```
 
 ### Cumulative statistics (DataFrame)
@@ -649,8 +656,8 @@ fmt.Println(flights)
 ```go
 type matrix struct{ dataframe.DataFrame }
 
-func (m matrix) At(i, j int) float64  { return m.Elem(i, j).Float() }
 func (m matrix) T() mat.Matrix        { return mat.Transpose{m} }
+// At(i, j) is promoted from the embedded DataFrame.
 ```
 
 Load a `gonum/mat.Matrix`:
@@ -801,8 +808,9 @@ series.Bools(values)
 series.Times(values)
 ```
 
-Core methods: `Len`, `Elem`, `Val`, `Float`, `Int`, `Int64`, `Bool`, `Records`,
-`Copy`, `Subset`, `Set`, `Append`, `Concat`, `Slice`, `Map`, `Order`, `Unique`,
+Core methods: `Len`, `Val`, `IsNA`, `Record`, `FloatAt`, `IntAt`, `Int64At`,
+`BoolAt`, `TimeAt`, `Float`, `Int`, `Int64`, `Bool`, `Records`,
+`Copy`, `Subset`, `Set`, `Append`, `Concat`, `Slice`, `Order`, `Unique`,
 `NUnique`, `ValueCounts`, `HasNaN`, `IsNaN`, `FillNaN`, `Compare`, `Empty`.
 
 Statistics: `Mean`, `StdDev`, `Median`, `Min`, `Max`, `MinStr`, `MaxStr`,
@@ -1081,7 +1089,6 @@ monthly := rg.Aggregation(
 
 ```go
 df.CapplyParallel(f)                                    // parallel column-wise apply
-df.RapplyParallel(f)                                    // parallel row-wise apply
 groups.AggregationParallel(typs, colnames)              // parallel GroupBy aggregation
 ```
 

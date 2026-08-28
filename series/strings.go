@@ -6,15 +6,15 @@ import (
 )
 
 // String-transformation methods. They require a String series and return a
-// new String series; NaN elements stay NaN. Calling them on another type
-// sets Err on the result.
+// new String series; missing elements stay missing. Calling them on another
+// type sets Err on the result.
 
 func (s Series) checkStringOp(op string) (stringElements, Series) {
 	if s.Err != nil {
-		return nil, s
+		return stringElements{}, s
 	}
 	if s.t != String {
-		return nil, Series{Err: fmt.Errorf("%s: requires a String series, got %s", op, s.t), Name: s.Name}
+		return stringElements{}, Series{Err: fmt.Errorf("%s: requires a String series, got %s", op, s.t), Name: s.Name}
 	}
 	return s.elements.(stringElements), Series{}
 }
@@ -24,13 +24,13 @@ func mapStrings(s Series, op string, f func(string) string) Series {
 	if err.Err != nil {
 		return err
 	}
-	out := make(stringElements, len(elems))
-	for i, e := range elems {
-		if e.IsNA() {
-			out[i] = stringElement{nan: true}
+	out := newColumn[string](len(elems.data))
+	for i, v := range elems.data {
+		if !elems.isValid(i) {
+			out.setNA(i)
 			continue
 		}
-		out[i] = stringElement{e: f(e.e)}
+		out.data[i] = f(v)
 	}
 	return Series{Name: s.Name, t: String, elements: out}
 }
@@ -71,19 +71,19 @@ func (s Series) ReplaceAll(old, new string) Series {
 }
 
 // mapStringPred evaluates a predicate per element and returns a Bool series
-// where NaN inputs stay NaN.
+// where missing inputs stay missing.
 func mapStringPred(s Series, op string, f func(string) bool) Series {
 	elems, err := s.checkStringOp(op)
 	if err.Err != nil {
 		return err
 	}
-	out := make(boolElements, len(elems))
-	for i, e := range elems {
-		if e.IsNA() {
-			out[i] = boolElement{nan: true}
+	out := newColumn[bool](len(elems.data))
+	for i, v := range elems.data {
+		if !elems.isValid(i) {
+			out.setNA(i)
 			continue
 		}
-		out[i] = boolElement{e: f(e.e)}
+		out.data[i] = f(v)
 	}
 	return Series{Name: s.Name, t: Bool, elements: out}
 }

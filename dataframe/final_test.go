@@ -272,21 +272,3 @@ func BenchmarkDataFrame_Arrange(b *testing.B) {
 		}
 	})
 }
-
-func BenchmarkDataFrame_RapplyParallel(b *testing.B) {
-	df := New(
-		series.New(makeFloats(10000), series.Float, "A"),
-		series.New(makeFloats(10000), series.Float, "B"),
-	)
-	f := func(s series.Series) series.Series { return s }
-	b.Run("Sequential", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			df.Rapply(f)
-		}
-	})
-	b.Run("Parallel", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			df.RapplyParallel(f)
-		}
-	})
-}

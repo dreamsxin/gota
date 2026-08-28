@@ -44,83 +44,83 @@ func (s Series) AggregateByGroup(groupCodes []int, nGroups int, needSum, needMea
 	switch elems := s.elements.(type) {
 	case floatElements:
 		for row, groupID := range groupCodes {
-			elem := elems[row]
+			isNA := !elems.isValid(row)
+			value := elems.data[row]
 			if needCount || needMean {
 				out.Count[groupID]++
 			}
-			value := elem.Float()
 			if needSum || needMean {
-				if !elem.IsNA() {
-					out.Sum[groupID] += elem.e
-				} else if needMean {
+				if !isNA {
 					out.Sum[groupID] += value
+				} else if needMean {
+					out.Sum[groupID] += math.NaN()
 				}
 			}
 			if needMax && !lockedMaxNaN[groupID] {
 				if !seenMax[groupID] {
 					seenMax[groupID] = true
-					if elem.IsNA() {
+					if isNA {
 						out.Max[groupID] = math.NaN()
 						lockedMaxNaN[groupID] = true
 					} else {
-						out.Max[groupID] = elem.e
+						out.Max[groupID] = value
 					}
-				} else if !elem.IsNA() && elem.e > out.Max[groupID] {
-					out.Max[groupID] = elem.e
+				} else if !isNA && value > out.Max[groupID] {
+					out.Max[groupID] = value
 				}
 			}
 			if needMin && !lockedMinNaN[groupID] {
 				if !seenMin[groupID] {
 					seenMin[groupID] = true
-					if elem.IsNA() {
+					if isNA {
 						out.Min[groupID] = math.NaN()
 						lockedMinNaN[groupID] = true
 					} else {
-						out.Min[groupID] = elem.e
+						out.Min[groupID] = value
 					}
-				} else if !elem.IsNA() && elem.e < out.Min[groupID] {
-					out.Min[groupID] = elem.e
+				} else if !isNA && value < out.Min[groupID] {
+					out.Min[groupID] = value
 				}
 			}
 		}
 	case intElements:
 		for row, groupID := range groupCodes {
-			elem := elems[row]
+			isNA := !elems.isValid(row)
+			value := float64(elems.data[row])
 			if needCount || needMean {
 				out.Count[groupID]++
 			}
-			value := elem.Float()
 			if needSum || needMean {
-				if !elem.IsNA() {
-					out.Sum[groupID] += float64(elem.e)
-				} else if needMean {
+				if !isNA {
 					out.Sum[groupID] += value
+				} else if needMean {
+					out.Sum[groupID] += math.NaN()
 				}
 			}
 			if needMax && !lockedMaxNaN[groupID] {
 				if !seenMax[groupID] {
 					seenMax[groupID] = true
-					if elem.IsNA() {
+					if isNA {
 						out.Max[groupID] = math.NaN()
 						lockedMaxNaN[groupID] = true
 					} else {
-						out.Max[groupID] = float64(elem.e)
+						out.Max[groupID] = value
 					}
-				} else if !elem.IsNA() && float64(elem.e) > out.Max[groupID] {
-					out.Max[groupID] = float64(elem.e)
+				} else if !isNA && value > out.Max[groupID] {
+					out.Max[groupID] = value
 				}
 			}
 			if needMin && !lockedMinNaN[groupID] {
 				if !seenMin[groupID] {
 					seenMin[groupID] = true
-					if elem.IsNA() {
+					if isNA {
 						out.Min[groupID] = math.NaN()
 						lockedMinNaN[groupID] = true
 					} else {
-						out.Min[groupID] = float64(elem.e)
+						out.Min[groupID] = value
 					}
-				} else if !elem.IsNA() && float64(elem.e) < out.Min[groupID] {
-					out.Min[groupID] = float64(elem.e)
+				} else if !isNA && value < out.Min[groupID] {
+					out.Min[groupID] = value
 				}
 			}
 		}
@@ -149,27 +149,24 @@ func (s Series) SumRows(rows []int) float64 {
 	case floatElements:
 		var sum float64
 		for _, row := range rows {
-			elem := elems[row]
-			if !elem.IsNA() {
-				sum += elem.e
+			if elems.isValid(row) {
+				sum += elems.data[row]
 			}
 		}
 		return sum
 	case intElements:
 		var sum float64
 		for _, row := range rows {
-			elem := elems[row]
-			if !elem.IsNA() {
-				sum += float64(elem.e)
+			if elems.isValid(row) {
+				sum += float64(elems.data[row])
 			}
 		}
 		return sum
 	default:
 		var sum float64
 		for _, row := range rows {
-			elem := s.Elem(row)
-			if !elem.IsNA() {
-				sum += elem.Float()
+			if !s.IsNA(row) {
+				sum += s.FloatAt(row)
 			}
 		}
 		return sum
@@ -182,23 +179,20 @@ func (s Series) SumByGroup(groupCodes []int, nGroups int) []float64 {
 	switch elems := s.elements.(type) {
 	case floatElements:
 		for row, groupID := range groupCodes {
-			elem := elems[row]
-			if !elem.IsNA() {
-				out[groupID] += elem.e
+			if elems.isValid(row) {
+				out[groupID] += elems.data[row]
 			}
 		}
 	case intElements:
 		for row, groupID := range groupCodes {
-			elem := elems[row]
-			if !elem.IsNA() {
-				out[groupID] += float64(elem.e)
+			if elems.isValid(row) {
+				out[groupID] += float64(elems.data[row])
 			}
 		}
 	default:
 		for row, groupID := range groupCodes {
-			elem := s.Elem(row)
-			if !elem.IsNA() {
-				out[groupID] += elem.Float()
+			if !s.IsNA(row) {
+				out[groupID] += s.FloatAt(row)
 			}
 		}
 	}
@@ -215,19 +209,27 @@ func (s Series) MeanRows(rows []int) float64 {
 	case floatElements:
 		var sum float64
 		for _, row := range rows {
-			sum += elems[row].Float()
+			if elems.isValid(row) {
+				sum += elems.data[row]
+			} else {
+				sum += math.NaN()
+			}
 		}
 		return sum / float64(len(rows))
 	case intElements:
 		var sum float64
 		for _, row := range rows {
-			sum += elems[row].Float()
+			if elems.isValid(row) {
+				sum += float64(elems.data[row])
+			} else {
+				sum += math.NaN()
+			}
 		}
 		return sum / float64(len(rows))
 	default:
 		var sum float64
 		for _, row := range rows {
-			sum += s.Elem(row).Float()
+			sum += s.FloatAt(row)
 		}
 		return sum / float64(len(rows))
 	}
@@ -241,17 +243,25 @@ func (s Series) MeanByGroup(groupCodes []int, nGroups int) []float64 {
 	switch elems := s.elements.(type) {
 	case floatElements:
 		for row, groupID := range groupCodes {
-			out[groupID] += elems[row].Float()
+			if elems.isValid(row) {
+				out[groupID] += elems.data[row]
+			} else {
+				out[groupID] += math.NaN()
+			}
 			counts[groupID]++
 		}
 	case intElements:
 		for row, groupID := range groupCodes {
-			out[groupID] += elems[row].Float()
+			if elems.isValid(row) {
+				out[groupID] += float64(elems.data[row])
+			} else {
+				out[groupID] += math.NaN()
+			}
 			counts[groupID]++
 		}
 	default:
 		for row, groupID := range groupCodes {
-			out[groupID] += s.Elem(row).Float()
+			out[groupID] += s.FloatAt(row)
 			counts[groupID]++
 		}
 	}
@@ -272,38 +282,35 @@ func (s Series) MaxRows(rows []int) float64 {
 	}
 	switch elems := s.elements.(type) {
 	case floatElements:
-		max := elems[rows[0]]
-		if max.IsNA() {
-			return max.Float()
+		if !elems.isValid(rows[0]) {
+			return math.NaN()
 		}
+		max := elems.data[rows[0]]
 		for _, row := range rows[1:] {
-			elem := elems[row]
-			if !elem.IsNA() && elem.e > max.e {
-				max = elem
+			if elems.isValid(row) && elems.data[row] > max {
+				max = elems.data[row]
 			}
 		}
-		return max.Float()
+		return max
 	case intElements:
-		max := elems[rows[0]]
-		if max.IsNA() {
-			return max.Float()
+		if !elems.isValid(rows[0]) {
+			return math.NaN()
 		}
+		max := elems.data[rows[0]]
 		for _, row := range rows[1:] {
-			elem := elems[row]
-			if !elem.IsNA() && elem.e > max.e {
-				max = elem
+			if elems.isValid(row) && elems.data[row] > max {
+				max = elems.data[row]
 			}
 		}
-		return max.Float()
+		return float64(max)
 	default:
-		max := s.Elem(rows[0])
+		max := s.FloatAt(rows[0])
 		for _, row := range rows[1:] {
-			elem := s.Elem(row)
-			if elem.Greater(max) {
-				max = elem
+			if v := s.FloatAt(row); v > max {
+				max = v
 			}
 		}
-		return max.Float()
+		return max
 	}
 }
 
@@ -319,19 +326,18 @@ func (s Series) MaxByGroup(groupCodes []int, nGroups int) ([]float64, bool) {
 			if lockedNaN[groupID] {
 				continue
 			}
-			elem := elems[row]
 			if !seen[groupID] {
 				seen[groupID] = true
-				if elem.IsNA() {
+				if !elems.isValid(row) {
 					out[groupID] = math.NaN()
 					lockedNaN[groupID] = true
 				} else {
-					out[groupID] = elem.e
+					out[groupID] = elems.data[row]
 				}
 				continue
 			}
-			if !elem.IsNA() && elem.e > out[groupID] {
-				out[groupID] = elem.e
+			if elems.isValid(row) && elems.data[row] > out[groupID] {
+				out[groupID] = elems.data[row]
 			}
 		}
 	case intElements:
@@ -339,19 +345,18 @@ func (s Series) MaxByGroup(groupCodes []int, nGroups int) ([]float64, bool) {
 			if lockedNaN[groupID] {
 				continue
 			}
-			elem := elems[row]
 			if !seen[groupID] {
 				seen[groupID] = true
-				if elem.IsNA() {
+				if !elems.isValid(row) {
 					out[groupID] = math.NaN()
 					lockedNaN[groupID] = true
 				} else {
-					out[groupID] = float64(elem.e)
+					out[groupID] = float64(elems.data[row])
 				}
 				continue
 			}
-			if !elem.IsNA() && float64(elem.e) > out[groupID] {
-				out[groupID] = float64(elem.e)
+			if elems.isValid(row) && float64(elems.data[row]) > out[groupID] {
+				out[groupID] = float64(elems.data[row])
 			}
 		}
 	default:
@@ -369,38 +374,35 @@ func (s Series) MinRows(rows []int) float64 {
 	}
 	switch elems := s.elements.(type) {
 	case floatElements:
-		min := elems[rows[0]]
-		if min.IsNA() {
-			return min.Float()
+		if !elems.isValid(rows[0]) {
+			return math.NaN()
 		}
+		min := elems.data[rows[0]]
 		for _, row := range rows[1:] {
-			elem := elems[row]
-			if !elem.IsNA() && elem.e < min.e {
-				min = elem
+			if elems.isValid(row) && elems.data[row] < min {
+				min = elems.data[row]
 			}
 		}
-		return min.Float()
+		return min
 	case intElements:
-		min := elems[rows[0]]
-		if min.IsNA() {
-			return min.Float()
+		if !elems.isValid(rows[0]) {
+			return math.NaN()
 		}
+		min := elems.data[rows[0]]
 		for _, row := range rows[1:] {
-			elem := elems[row]
-			if !elem.IsNA() && elem.e < min.e {
-				min = elem
+			if elems.isValid(row) && elems.data[row] < min {
+				min = elems.data[row]
 			}
 		}
-		return min.Float()
+		return float64(min)
 	default:
-		min := s.Elem(rows[0])
+		min := s.FloatAt(rows[0])
 		for _, row := range rows[1:] {
-			elem := s.Elem(row)
-			if elem.Less(min) {
-				min = elem
+			if v := s.FloatAt(row); v < min {
+				min = v
 			}
 		}
-		return min.Float()
+		return min
 	}
 }
 
@@ -416,19 +418,18 @@ func (s Series) MinByGroup(groupCodes []int, nGroups int) ([]float64, bool) {
 			if lockedNaN[groupID] {
 				continue
 			}
-			elem := elems[row]
 			if !seen[groupID] {
 				seen[groupID] = true
-				if elem.IsNA() {
+				if !elems.isValid(row) {
 					out[groupID] = math.NaN()
 					lockedNaN[groupID] = true
 				} else {
-					out[groupID] = elem.e
+					out[groupID] = elems.data[row]
 				}
 				continue
 			}
-			if !elem.IsNA() && elem.e < out[groupID] {
-				out[groupID] = elem.e
+			if elems.isValid(row) && elems.data[row] < out[groupID] {
+				out[groupID] = elems.data[row]
 			}
 		}
 	case intElements:
@@ -436,19 +437,18 @@ func (s Series) MinByGroup(groupCodes []int, nGroups int) ([]float64, bool) {
 			if lockedNaN[groupID] {
 				continue
 			}
-			elem := elems[row]
 			if !seen[groupID] {
 				seen[groupID] = true
-				if elem.IsNA() {
+				if !elems.isValid(row) {
 					out[groupID] = math.NaN()
 					lockedNaN[groupID] = true
 				} else {
-					out[groupID] = float64(elem.e)
+					out[groupID] = float64(elems.data[row])
 				}
 				continue
 			}
-			if !elem.IsNA() && float64(elem.e) < out[groupID] {
-				out[groupID] = float64(elem.e)
+			if elems.isValid(row) && float64(elems.data[row]) < out[groupID] {
+				out[groupID] = float64(elems.data[row])
 			}
 		}
 	default:

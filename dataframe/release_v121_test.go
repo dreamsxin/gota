@@ -26,7 +26,7 @@ func TestInnerJoinCompositeKeyEncoding(t *testing.T) {
 	if joined.Nrow() != 1 {
 		t.Fatalf("collision-safe join rows: got %d want 1", joined.Nrow())
 	}
-	if got := joined.Col("left_value").Elem(0).String(); got != "2" {
+	if got := joined.Col("left_value").Record(0); got != "2" {
 		t.Fatalf("collision-safe join matched left value %s, want 2", got)
 	}
 }

@@ -2,7 +2,6 @@ package series
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 )
 
@@ -32,123 +31,76 @@ func BatchConvert[T any](src []T, dst Type, name string) Series {
 }
 
 func batchConvertToInt[T any](src []T, name string) Series {
-	n := len(src)
-	elems := make(intElements, n)
-
+	col := newColumn[int64](len(src))
 	for i, v := range src {
-		switch val := any(v).(type) {
-		case int:
-			elems[i] = intElement{e: int64(val), nan: false}
-		case int64:
-			elems[i] = intElement{e: val, nan: false}
-		case float64:
-			elems[i] = intElement{e: int64(val), nan: false}
-		case string:
-			if parsed, err := strconv.Atoi(val); err == nil {
-				elems[i] = intElement{e: int64(parsed), nan: false}
-			} else {
-				elems[i] = intElement{e: 0, nan: true}
-			}
-		default:
-			elems[i] = intElement{e: 0, nan: true}
+		if parsed, ok := parseInt64Value(v); ok {
+			col.data[i] = parsed
+		} else {
+			col.setNA(i)
 		}
 	}
-
-	return Series{Name: name, elements: elems, t: Int}
+	return Series{Name: name, elements: col, t: Int}
 }
 
 func batchConvertToFloat[T any](src []T, name string) Series {
-	n := len(src)
-	elems := make(floatElements, n)
-
+	col := newColumn[float64](len(src))
 	for i, v := range src {
 		switch val := any(v).(type) {
-		case float64:
-			elems[i] = floatElement{e: val, nan: false}
 		case float32:
-			elems[i] = floatElement{e: float64(val), nan: false}
-		case int:
-			elems[i] = floatElement{e: float64(val), nan: false}
-		case int64:
-			elems[i] = floatElement{e: float64(val), nan: false}
-		case string:
-			if f, err := strconv.ParseFloat(val, 64); err == nil {
-				elems[i] = floatElement{e: f, nan: false}
-			} else {
-				elems[i] = floatElement{e: 0, nan: true}
-			}
+			col.data[i] = float64(val)
 		default:
-			elems[i] = floatElement{e: 0, nan: true}
+			if parsed, ok := parseFloat64Value(v); ok {
+				col.data[i] = parsed
+			} else {
+				col.setNA(i)
+			}
 		}
 	}
-
-	return Series{Name: name, elements: elems, t: Float}
+	return Series{Name: name, elements: col, t: Float}
 }
 
 func batchConvertToString[T any](src []T, name string) Series {
-	n := len(src)
-	elems := make(stringElements, n)
-
+	col := newColumn[string](len(src))
 	for i, v := range src {
 		switch val := any(v).(type) {
 		case string:
-			elems[i] = stringElement{e: val, nan: false}
+			col.data[i] = val
 		case fmt.Stringer:
-			elems[i] = stringElement{e: val.String(), nan: false}
+			col.data[i] = val.String()
 		default:
-			elems[i] = stringElement{e: fmt.Sprintf("%v", val), nan: false}
+			col.data[i] = fmt.Sprintf("%v", val)
 		}
 	}
-
-	return Series{Name: name, elements: elems, t: String}
+	return Series{Name: name, elements: col, t: String}
 }
 
 func batchConvertToBool[T any](src []T, name string) Series {
-	n := len(src)
-	elems := make(boolElements, n)
-
+	col := newColumn[bool](len(src))
 	for i, v := range src {
-		switch val := any(v).(type) {
-		case bool:
-			elems[i] = boolElement{e: val, nan: false}
-		case int:
-			elems[i] = boolElement{e: val != 0, nan: false}
-		case int64:
-			elems[i] = boolElement{e: val != 0, nan: false}
-		case string:
-			elems[i] = boolElement{e: val == "true" || val == "1", nan: false}
-		default:
-			elems[i] = boolElement{e: false, nan: true}
+		if parsed, ok := parseBoolValue(v); ok {
+			col.data[i] = parsed
+		} else {
+			col.setNA(i)
 		}
 	}
-
-	return Series{Name: name, elements: elems, t: Bool}
+	return Series{Name: name, elements: col, t: Bool}
 }
 
 func batchConvertToTime[T any](src []T, name string) Series {
-	n := len(src)
-	elems := make(timeElements, n)
-
+	col := newColumn[time.Time](len(src))
 	for i, v := range src {
 		switch val := any(v).(type) {
-		case time.Time:
-			elems[i] = timeElement{e: val, nan: false}
 		case int64:
-			elems[i] = timeElement{e: time.Unix(val, 0), nan: false}
-		case int:
-			elems[i] = timeElement{e: time.Unix(int64(val), 0), nan: false}
-		case string:
-			if t, err := time.ParseInLocation(time.RFC3339, val, time.Local); err == nil {
-				elems[i] = timeElement{e: t, nan: false}
-			} else {
-				elems[i] = timeElement{e: time.Time{}, nan: true}
-			}
+			col.data[i] = time.Unix(val, 0)
 		default:
-			elems[i] = timeElement{e: time.Time{}, nan: true}
+			if parsed, ok := parseTimeValue(v); ok {
+				col.data[i] = parsed
+			} else {
+				col.setNA(i)
+			}
 		}
 	}
-
-	return Series{Name: name, elements: elems, t: Time}
+	return Series{Name: name, elements: col, t: Time}
 }
 
 // BatchConvertInts converts []int to Series with specified type

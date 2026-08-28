@@ -31,7 +31,7 @@ func floatSliceEq(t *testing.T, tag string, got, want []float64, eps float64) {
 func seriesFloats(s Series) []float64 {
 	out := make([]float64, s.Len())
 	for i := range out {
-		out[i] = s.Elem(i).Float()
+		out[i] = s.FloatAt(i)
 	}
 	return out
 }

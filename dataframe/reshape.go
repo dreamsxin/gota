@@ -104,11 +104,10 @@ func (df DataFrame) Resample(colname string, freq ResampleFreq) ResampleGroups {
 	}
 
 	for i := 0; i < df.nrows; i++ {
-		e := col.Elem(i)
-		if e.IsNA() {
+		if col.IsNA(i) {
 			continue
 		}
-		tv, _ := e.Time()
+		tv, _ := col.TimeAt(i)
 		ns := nsKey(tv)
 		if _, ok := bucketByNs[ns]; !ok {
 			bucketByNs[ns] = &bucket{label: truncate(tv)}
@@ -231,7 +230,7 @@ func (df DataFrame) Unstack(idVars []string, colVar, colVal string) DataFrame {
 	seen := make(map[string]struct{})
 	var varVals []string
 	for i := 0; i < varCol.Len(); i++ {
-		v := varCol.Elem(i).String()
+		v := varCol.Record(i)
 		if _, ok := seen[v]; !ok {
 			seen[v] = struct{}{}
 			varVals = append(varVals, v)
@@ -248,7 +247,7 @@ func (df DataFrame) Unstack(idVars []string, colVar, colVal string) DataFrame {
 	rowKey := func(i int) string {
 		parts := make([]string, len(idVars))
 		for j := range idVars {
-			parts[j] = idCols[j].Elem(i).String()
+			parts[j] = idCols[j].Record(i)
 		}
 		return strings.Join(parts, "\x00")
 	}
@@ -265,7 +264,7 @@ func (df DataFrame) Unstack(idVars []string, colVar, colVal string) DataFrame {
 			rowKeys = append(rowKeys, k)
 			parts := make([]string, len(idVars))
 			for j := range idVars {
-				parts[j] = idCols[j].Elem(i).String()
+				parts[j] = idCols[j].Record(i)
 			}
 			parsedParts = append(parsedParts, parts)
 		}
@@ -275,8 +274,8 @@ func (df DataFrame) Unstack(idVars []string, colVar, colVal string) DataFrame {
 	lookup := make(map[string]string, df.nrows)
 	valCol := df.Col(colVal)
 	for i := 0; i < df.nrows; i++ {
-		k := rowKey(i) + "\x01" + varCol.Elem(i).String()
-		lookup[k] = valCol.Elem(i).String()
+		k := rowKey(i) + "\x01" + varCol.Record(i)
+		lookup[k] = valCol.Record(i)
 	}
 
 	// Build output columns: idVars first, then one column per varVal.
@@ -480,8 +479,8 @@ func (df DataFrame) CrossTab(rowCol, colCol string) DataFrame {
 		counts[r] = make(map[string]int, len(colLabels))
 	}
 	for i := 0; i < df.nrows; i++ {
-		r := rowSeries.Elem(i).String()
-		c := colSeries.Elem(i).String()
+		r := rowSeries.Record(i)
+		c := colSeries.Record(i)
 		if _, ok := counts[r]; ok {
 			counts[r][c]++
 		}
@@ -507,11 +506,10 @@ func uniqueStrings(s series.Series) []string {
 	seen := make(map[string]struct{}, s.Len())
 	var out []string
 	for i := 0; i < s.Len(); i++ {
-		e := s.Elem(i)
-		if e.IsNA() {
+		if s.IsNA(i) {
 			continue
 		}
-		k := e.String()
+		k := s.Record(i)
 		if _, ok := seen[k]; !ok {
 			seen[k] = struct{}{}
 			out = append(out, k)

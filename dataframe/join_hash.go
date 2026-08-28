@@ -69,14 +69,14 @@ func resolveJoinKeys(a, b DataFrame, keys []string) (joinKeys, error) {
 func buildJoinKey(cols []series.Series, keyIdxs []int, row int) string {
 	var sb strings.Builder
 	for _, k := range keyIdxs {
-		elem := cols[k].Elem(row)
-		appendLengthPrefixed(&sb, string(elem.Type()))
-		if elem.IsNA() {
+		col := cols[k]
+		appendLengthPrefixed(&sb, string(col.Type()))
+		if col.IsNA(row) {
 			sb.WriteByte('0')
 			continue
 		}
 		sb.WriteByte('1')
-		appendLengthPrefixed(&sb, elem.String())
+		appendLengthPrefixed(&sb, col.Record(row))
 	}
 	return sb.String()
 }
@@ -102,15 +102,15 @@ func buildHashTable(b DataFrame, iKeysB []int) map[string][]int {
 func appendMatchedRow(newCols []series.Series, aCols, bCols []series.Series, jk joinKeys, i, j int) {
 	ii := 0
 	for _, k := range jk.iKeysA {
-		newCols[ii].Append(aCols[k].Elem(i))
+		newCols[ii].AppendValueFrom(aCols[k], i)
 		ii++
 	}
 	for _, k := range jk.iNotKeysA {
-		newCols[ii].Append(aCols[k].Elem(i))
+		newCols[ii].AppendValueFrom(aCols[k], i)
 		ii++
 	}
 	for _, k := range jk.iNotKeysB {
-		newCols[ii].Append(bCols[k].Elem(j))
+		newCols[ii].AppendValueFrom(bCols[k], j)
 		ii++
 	}
 }
@@ -119,11 +119,11 @@ func appendMatchedRow(newCols []series.Series, aCols, bCols []series.Series, jk 
 func appendLeftOnlyRow(newCols []series.Series, aCols []series.Series, jk joinKeys, i int) {
 	ii := 0
 	for _, k := range jk.iKeysA {
-		newCols[ii].Append(aCols[k].Elem(i))
+		newCols[ii].AppendValueFrom(aCols[k], i)
 		ii++
 	}
 	for _, k := range jk.iNotKeysA {
-		newCols[ii].Append(aCols[k].Elem(i))
+		newCols[ii].AppendValueFrom(aCols[k], i)
 		ii++
 	}
 	for range jk.iNotKeysB {
@@ -136,7 +136,7 @@ func appendLeftOnlyRow(newCols []series.Series, aCols []series.Series, jk joinKe
 func appendRightOnlyRow(newCols []series.Series, bCols []series.Series, jk joinKeys, j int) {
 	ii := 0
 	for _, k := range jk.iKeysB {
-		newCols[ii].Append(bCols[k].Elem(j))
+		newCols[ii].AppendValueFrom(bCols[k], j)
 		ii++
 	}
 	for range jk.iNotKeysA {
@@ -144,7 +144,7 @@ func appendRightOnlyRow(newCols []series.Series, bCols []series.Series, jk joinK
 		ii++
 	}
 	for _, k := range jk.iNotKeysB {
-		newCols[ii].Append(bCols[k].Elem(j))
+		newCols[ii].AppendValueFrom(bCols[k], j)
 		ii++
 	}
 }

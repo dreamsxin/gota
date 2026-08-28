@@ -1,7 +1,6 @@
 package series
 
 import (
-	"strconv"
 	"strings"
 	"time"
 )
@@ -13,67 +12,52 @@ func stringsToSeriesDirect(values []string, t Type, name string) (Series, bool) 
 		s.Name = name
 		return s, true
 	case Int:
-		elems := make(intElements, len(values))
+		col := newColumn[int64](len(values))
 		for i, v := range values {
-			if v == "NaN" {
-				elems[i] = intElement{nan: true}
-				continue
+			if n, ok := parseInt64Value(v); ok {
+				col.data[i] = n
+			} else {
+				col.setNA(i)
 			}
-			n, err := strconv.Atoi(v)
-			if err != nil {
-				elems[i] = intElement{nan: true}
-				continue
-			}
-			elems[i] = intElement{e: int64(n)}
 		}
-		return Series{Name: name, t: Int, elements: elems}, true
+		return Series{Name: name, t: Int, elements: col}, true
 	case Float:
-		elems := make(floatElements, len(values))
+		col := newColumn[float64](len(values))
 		for i, v := range values {
-			if v == "NaN" {
-				elems[i] = floatElement{nan: true}
-				continue
+			if f, ok := parseFloat64Value(v); ok {
+				col.data[i] = f
+			} else {
+				col.setNA(i)
 			}
-			n, err := strconv.ParseFloat(v, 64)
-			if err != nil {
-				elems[i] = floatElement{nan: true}
-				continue
-			}
-			elems[i] = floatElement{e: n}
 		}
-		return Series{Name: name, t: Float, elements: elems}, true
+		return Series{Name: name, t: Float, elements: col}, true
 	case Bool:
-		elems := make(boolElements, len(values))
+		col := newColumn[bool](len(values))
 		for i, v := range values {
 			if v == "NaN" {
-				elems[i] = boolElement{nan: true}
+				col.setNA(i)
 				continue
 			}
 			switch strings.ToLower(v) {
 			case "true", "t", "1":
-				elems[i] = boolElement{e: true}
+				col.data[i] = true
 			case "false", "f", "0":
-				elems[i] = boolElement{e: false}
+				col.data[i] = false
 			default:
-				elems[i] = boolElement{nan: true}
+				col.setNA(i)
 			}
 		}
-		return Series{Name: name, t: Bool, elements: elems}, true
+		return Series{Name: name, t: Bool, elements: col}, true
 	case Time:
-		elems := make(timeElements, len(values))
+		col := newColumn[time.Time](len(values))
 		for i, v := range values {
-			if v == "NaN" {
-				elems[i] = timeElement{nan: true}
-				continue
+			if ts, ok := parseTimeValue(v); ok {
+				col.data[i] = ts
+			} else {
+				col.setNA(i)
 			}
-			ts, err := time.ParseInLocation(time.RFC3339, v, time.Local)
-			if err != nil {
-				elems[i] = timeElement{nan: true}
-				continue
-			}
-			elems[i] = timeElement{e: ts}
 		}
-		return Series{Name: name, t: Time, elements: elems}, true
+		return Series{Name: name, t: Time, elements: col}, true
 	default:
 		return Series{}, false
 	}

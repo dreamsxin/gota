@@ -110,12 +110,11 @@ func (df DataFrame) Info(w io.Writer) {
 			totalBytes += df.nrows * 24
 		}
 		for j := 0; j < df.nrows; j++ {
-			e := col.Elem(j)
-			if !e.IsNA() {
+			if !col.IsNA(j) {
 				nonNull++
 			}
 			if col.Type() == series.String {
-				totalBytes += 16 + len(e.String())
+				totalBytes += 16 + len(col.Record(j))
 			}
 		}
 		fmt.Fprintf(w, "   %-*s  %d non-null   %s\n", maxNameLen, colnames[i], nonNull, types[i])
@@ -150,7 +149,7 @@ func (df DataFrame) IsNull() DataFrame {
 	for i, col := range df.columns {
 		bools := make([]bool, df.nrows)
 		for j := 0; j < df.nrows; j++ {
-			bools[j] = col.Elem(j).IsNA()
+			bools[j] = col.IsNA(j)
 		}
 		columns[i] = series.Bools(bools)
 		columns[i].Name = col.Name
@@ -181,7 +180,7 @@ func (df DataFrame) NotNull() DataFrame {
 	for i, col := range df.columns {
 		bools := make([]bool, df.nrows)
 		for j := 0; j < df.nrows; j++ {
-			bools[j] = !col.Elem(j).IsNA()
+			bools[j] = !col.IsNA(j)
 		}
 		columns[i] = series.Bools(bools)
 		columns[i].Name = col.Name
@@ -414,7 +413,7 @@ func (df DataFrame) ApplyMapTyped(f func(interface{}) interface{}) DataFrame {
 	for i, col := range df.columns {
 		elements := make([]interface{}, df.nrows)
 		for j := 0; j < df.nrows; j++ {
-			elements[j] = f(col.Elem(j).Val())
+			elements[j] = f(col.Val(j))
 		}
 		columns[i] = series.New(elements, col.Type(), col.Name)
 	}
@@ -439,7 +438,7 @@ func (df DataFrame) ApplyMap(f func(interface{}) interface{}) DataFrame {
 	for i, col := range df.columns {
 		elements := make([]interface{}, df.nrows)
 		for j := 0; j < df.nrows; j++ {
-			elements[j] = f(col.Elem(j).Val())
+			elements[j] = f(col.Val(j))
 		}
 		columns[i] = series.New(elements, col.Type(), col.Name)
 	}
@@ -563,7 +562,7 @@ func (df DataFrame) Replace(toReplace, with interface{}) DataFrame {
 	for i, col := range df.columns {
 		elements := make([]interface{}, df.nrows)
 		for j := 0; j < df.nrows; j++ {
-			val := col.Elem(j).Val()
+			val := col.Val(j)
 			if val == toReplace {
 				elements[j] = with
 			} else {
@@ -595,7 +594,7 @@ func (df DataFrame) ReplaceInColumn(colname string, toReplace, with interface{})
 	col := df.columns[idx]
 	elements := make([]interface{}, df.nrows)
 	for j := 0; j < df.nrows; j++ {
-		val := col.Elem(j).Val()
+		val := col.Val(j)
 		if val == toReplace {
 			elements[j] = with
 		} else {
@@ -748,7 +747,7 @@ func (df DataFrame) IsIn(colname string, values []interface{}) series.Series {
 
 	bools := make([]bool, df.nrows)
 	for i := 0; i < df.nrows; i++ {
-		val := col.Elem(i).String()
+		val := col.Record(i)
 		bools[i] = lookup[val]
 	}
 
@@ -844,7 +843,7 @@ func (df DataFrame) ExplodeOn(colname, sep string) DataFrame {
 	}
 
 	for row := 0; row < df.nrows; row++ {
-		cell := df.columns[idx].Elem(row).String()
+		cell := df.columns[idx].Record(row)
 		parts := strings.Split(cell, sep)
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
@@ -852,7 +851,7 @@ func (df DataFrame) ExplodeOn(colname, sep string) DataFrame {
 				if ci == idx {
 					newCols[ci].Append(part)
 				} else {
-					newCols[ci].Append(col.Elem(row))
+					newCols[ci].AppendValueFrom(col, row)
 				}
 			}
 		}

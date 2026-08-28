@@ -59,8 +59,8 @@ func TestDataFrame_Tail(t *testing.T) {
 	}
 
 	// Check last values
-	if tail.Elem(2, 0).String() != "9" {
-		t.Errorf("Expected last value to be 9, got %s", tail.Elem(2, 0).String())
+	if tail.CellRecord(2, 0) != "9" {
+		t.Errorf("Expected last value to be 9, got %s", tail.CellRecord(2, 0))
 	}
 
 	// Test n > nrows
@@ -124,13 +124,13 @@ func TestDataFrame_IsNull(t *testing.T) {
 	}
 
 	// Check [1,0] is true (NaN in column A, row 1)
-	val, _ := mask.Elem(1, 0).Bool()
+	val, _ := mask.CellBool(1, 0)
 	if !val {
 		t.Errorf("Expected true for NaN value")
 	}
 
 	// Check [0,0] is false (non-NaN value)
-	val, _ = mask.Elem(0, 0).Bool()
+	val, _ = mask.CellBool(0, 0)
 	if val {
 		t.Errorf("Expected false for non-NaN value")
 	}
@@ -147,13 +147,13 @@ func TestDataFrame_NotNull(t *testing.T) {
 	mask := df.NotNull()
 
 	// Check [0,0] is true (non-NaN value)
-	val, _ := mask.Elem(0, 0).Bool()
+	val, _ := mask.CellBool(0, 0)
 	if !val {
 		t.Errorf("Expected true for non-NaN value")
 	}
 
 	// Check [1,0] is false (NaN value)
-	val, _ = mask.Elem(1, 0).Bool()
+	val, _ = mask.CellBool(1, 0)
 	if val {
 		t.Errorf("Expected false for NaN value")
 	}
@@ -182,15 +182,15 @@ func TestDataFrame_ValueCounts(t *testing.T) {
 
 	// x should have count 3
 	countCol := vc.Col("count")
-	if countCol.Elem(0).Float() != 3 {
-		t.Errorf("Expected x count to be 3, got %f", countCol.Elem(0).Float())
+	if countCol.FloatAt(0) != 3 {
+		t.Errorf("Expected x count to be 3, got %f", countCol.FloatAt(0))
 	}
 
 	// Test normalize mode
 	vcNorm := df.ValueCounts("A", true, false)
 	propCol := vcNorm.Col("proportion")
-	if propCol.Elem(0).Float() != 0.6 {
-		t.Errorf("Expected x proportion to be 0.6, got %f", propCol.Elem(0).Float())
+	if propCol.FloatAt(0) != 0.6 {
+		t.Errorf("Expected x proportion to be 0.6, got %f", propCol.FloatAt(0))
 	}
 }
 
@@ -214,8 +214,8 @@ func TestDataFrame_NLargest(t *testing.T) {
 	}
 
 	// First row should have B=9
-	if top3.Elem(0, 1).Float() != 9 {
-		t.Errorf("Expected largest value 9, got %f", top3.Elem(0, 1).Float())
+	if top3.At(0, 1) != 9 {
+		t.Errorf("Expected largest value 9, got %f", top3.At(0, 1))
 	}
 }
 
@@ -235,8 +235,8 @@ func TestDataFrame_NSmallest(t *testing.T) {
 	}
 
 	// First row should have B=1
-	if bottom3.Elem(0, 1).Float() != 1 {
-		t.Errorf("Expected smallest value 1, got %f", bottom3.Elem(0, 1).Float())
+	if bottom3.At(0, 1) != 1 {
+		t.Errorf("Expected smallest value 1, got %f", bottom3.At(0, 1))
 	}
 }
 
@@ -323,14 +323,14 @@ func TestDataFrame_Clip(t *testing.T) {
 	clipped := df.Clip(&lower, &upper)
 
 	// Check values are clipped
-	if clipped.Elem(0, 0).Float() != 0 {
-		t.Errorf("Expected -5 to be clipped to 0, got %f", clipped.Elem(0, 0).Float())
+	if clipped.At(0, 0) != 0 {
+		t.Errorf("Expected -5 to be clipped to 0, got %f", clipped.At(0, 0))
 	}
-	if clipped.Elem(0, 1).Float() != 100 {
-		t.Errorf("Expected 150 to be clipped to 100, got %f", clipped.Elem(0, 1).Float())
+	if clipped.At(0, 1) != 100 {
+		t.Errorf("Expected 150 to be clipped to 100, got %f", clipped.At(0, 1))
 	}
-	if clipped.Elem(1, 0).Float() != 50 {
-		t.Errorf("Expected 50 to remain 50, got %f", clipped.Elem(1, 0).Float())
+	if clipped.At(1, 0) != 50 {
+		t.Errorf("Expected 50 to remain 50, got %f", clipped.At(1, 0))
 	}
 }
 
@@ -347,13 +347,13 @@ func TestDataFrame_ClipColumn(t *testing.T) {
 	clipped := df.ClipColumn("A", &lower, &upper)
 
 	// Check column A is clipped
-	if clipped.Elem(0, 0).Float() != 0 {
-		t.Errorf("Expected -5 to be clipped to 0, got %f", clipped.Elem(0, 0).Float())
+	if clipped.At(0, 0) != 0 {
+		t.Errorf("Expected -5 to be clipped to 0, got %f", clipped.At(0, 0))
 	}
 
 	// Check column B is unchanged
-	if clipped.Elem(0, 1).Float() != 150 {
-		t.Errorf("Expected column B to be unchanged, got %f", clipped.Elem(0, 1).Float())
+	if clipped.At(0, 1) != 150 {
+		t.Errorf("Expected column B to be unchanged, got %f", clipped.At(0, 1))
 	}
 }
 
@@ -372,16 +372,16 @@ func TestDataFrame_Replace(t *testing.T) {
 	replaced := df.Replace("x", "z")
 
 	// Check x values are replaced
-	if replaced.Elem(0, 0).String() != "z" {
-		t.Errorf("Expected x to be replaced with z, got %s", replaced.Elem(0, 0).String())
+	if replaced.CellRecord(0, 0) != "z" {
+		t.Errorf("Expected x to be replaced with z, got %s", replaced.CellRecord(0, 0))
 	}
-	if replaced.Elem(2, 0).String() != "z" {
-		t.Errorf("Expected x to be replaced with z, got %s", replaced.Elem(2, 0).String())
+	if replaced.CellRecord(2, 0) != "z" {
+		t.Errorf("Expected x to be replaced with z, got %s", replaced.CellRecord(2, 0))
 	}
 
 	// Check y is unchanged
-	if replaced.Elem(1, 0).String() != "y" {
-		t.Errorf("Expected y to be unchanged, got %s", replaced.Elem(1, 0).String())
+	if replaced.CellRecord(1, 0) != "y" {
+		t.Errorf("Expected y to be unchanged, got %s", replaced.CellRecord(1, 0))
 	}
 }
 
@@ -396,13 +396,13 @@ func TestDataFrame_ReplaceInColumn(t *testing.T) {
 	replaced := df.ReplaceInColumn("A", "x", "z")
 
 	// Check column A is replaced
-	if replaced.Elem(0, 0).String() != "z" {
-		t.Errorf("Expected x to be replaced with z, got %s", replaced.Elem(0, 0).String())
+	if replaced.CellRecord(0, 0) != "z" {
+		t.Errorf("Expected x to be replaced with z, got %s", replaced.CellRecord(0, 0))
 	}
 
 	// Check column B is unchanged
-	if replaced.Elem(0, 1).String() != "1" {
-		t.Errorf("Expected column B to be unchanged, got %s", replaced.Elem(0, 1).String())
+	if replaced.CellRecord(0, 1) != "1" {
+		t.Errorf("Expected column B to be unchanged, got %s", replaced.CellRecord(0, 1))
 	}
 }
 
@@ -444,15 +444,15 @@ func TestDataFrame_Between(t *testing.T) {
 	// Test inclusive bounds
 	mask := df.Between("B", 10, 20, "both")
 
-	val, _ := mask.Elem(0).Bool()
+	val, _ := mask.BoolAt(0)
 	if val {
 		t.Errorf("Expected 5 to be outside [10,20]")
 	}
-	val, _ = mask.Elem(1).Bool()
+	val, _ = mask.BoolAt(1)
 	if !val {
 		t.Errorf("Expected 15 to be inside [10,20]")
 	}
-	val, _ = mask.Elem(2).Bool()
+	val, _ = mask.BoolAt(2)
 	if val {
 		t.Errorf("Expected 25 to be outside [10,20]")
 	}
@@ -473,19 +473,19 @@ func TestDataFrame_IsIn(t *testing.T) {
 
 	mask := df.IsIn("A", []interface{}{"x", "z"})
 
-	val, _ := mask.Elem(0).Bool()
+	val, _ := mask.BoolAt(0)
 	if !val {
 		t.Errorf("Expected x to be in set")
 	}
-	val, _ = mask.Elem(1).Bool()
+	val, _ = mask.BoolAt(1)
 	if val {
 		t.Errorf("Expected y to not be in set")
 	}
-	val, _ = mask.Elem(2).Bool()
+	val, _ = mask.BoolAt(2)
 	if !val {
 		t.Errorf("Expected z to be in set")
 	}
-	val, _ = mask.Elem(3).Bool()
+	val, _ = mask.BoolAt(3)
 	if val {
 		t.Errorf("Expected w to not be in set")
 	}
@@ -506,7 +506,7 @@ func TestDataFrame_FilterIsIn(t *testing.T) {
 		t.Errorf("Expected 2 rows after filtering, got %d", filtered.Nrow())
 	}
 
-	if filtered.Elem(0, 0).String() != "x" {
-		t.Errorf("Expected first row to be x, got %s", filtered.Elem(0, 0).String())
+	if filtered.CellRecord(0, 0) != "x" {
+		t.Errorf("Expected first row to be x, got %s", filtered.CellRecord(0, 0))
 	}
 }

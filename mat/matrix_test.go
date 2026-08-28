@@ -91,16 +91,16 @@ func TestMatrix_Div(t *testing.T) {
 
 	// Division by zero → NaN (not 0).
 	got2 := Div(series.Floats([]float64{5.0, 3.0}), series.Floats([]float64{0.0, 1.5}))
-	if !got2.Elem(0).IsNA() {
-		t.Errorf("Div by zero: expected NaN, got %v", got2.Elem(0).Val())
+	if !got2.IsNA(0) {
+		t.Errorf("Div by zero: expected NaN, got %v", got2.Val(0))
 	}
-	if got2.Elem(1).Float() != 2.0 {
-		t.Errorf("Div[1]: expected 2.0, got %v", got2.Elem(1).Float())
+	if got2.FloatAt(1) != 2.0 {
+		t.Errorf("Div[1]: expected 2.0, got %v", got2.FloatAt(1))
 	}
 
 	// Int division.
 	got3 := Div(series.Ints([]int{6, 4}), series.Ints([]int{2, 2}))
-	if got3.Elem(0).Float() != 3.0 || got3.Elem(1).Float() != 2.0 {
+	if got3.FloatAt(0) != 3.0 || got3.FloatAt(1) != 2.0 {
 		t.Errorf("Div int: got %v", got3.Records())
 	}
 }
@@ -116,16 +116,16 @@ func TestMatrix_Cal(t *testing.T) {
 		t.Fatalf("Cal ModeZero len: got %d want 5", got.Len())
 	}
 	// Index 0: 0/0 → NaN
-	if !got.Elem(0).IsNA() {
-		t.Errorf("Cal[0]: expected NaN (0/0), got %v", got.Elem(0).Val())
+	if !got.IsNA(0) {
+		t.Errorf("Cal[0]: expected NaN (0/0), got %v", got.Val(0))
 	}
 	// Index 1: 2/1 → 2
-	if got.Elem(1).Float() != 2.0 {
-		t.Errorf("Cal[1]: expected 2.0, got %v", got.Elem(1).Float())
+	if got.FloatAt(1) != 2.0 {
+		t.Errorf("Cal[1]: expected 2.0, got %v", got.FloatAt(1))
 	}
 	// Index 4: 0/4 → 0
-	if got.Elem(4).Float() != 0.0 {
-		t.Errorf("Cal[4]: expected 0.0, got %v", got.Elem(4).Float())
+	if got.FloatAt(4) != 0.0 {
+		t.Errorf("Cal[4]: expected 0.0, got %v", got.FloatAt(4))
 	}
 }
 

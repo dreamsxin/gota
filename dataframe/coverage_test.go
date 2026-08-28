@@ -35,8 +35,8 @@ func TestDataFrame_Tail(t *testing.T) {
 	if tail.Nrow() != 2 {
 		t.Fatalf("Tail(2): expected 2 rows, got %d", tail.Nrow())
 	}
-	if tail.Col("x").Elem(0).String() != "4" {
-		t.Errorf("Tail(2)[0]: expected 4, got %s", tail.Col("x").Elem(0).String())
+	if tail.Col("x").Record(0) != "4" {
+		t.Errorf("Tail(2)[0]: expected 4, got %s", tail.Col("x").Record(0))
 	}
 }
 
@@ -79,15 +79,15 @@ func TestDataFrame_IsNull_NotNull(t *testing.T) {
 	if nullMask.Err != nil {
 		t.Fatal(nullMask.Err)
 	}
-	b0, _ := nullMask.Col("v").Elem(0).Bool()
-	b1, _ := nullMask.Col("v").Elem(1).Bool()
+	b0, _ := nullMask.Col("v").BoolAt(0)
+	b1, _ := nullMask.Col("v").BoolAt(1)
 	if b0 || !b1 {
 		t.Errorf("IsNull: expected [false true false], got [%v %v]", b0, b1)
 	}
 
 	notNull := df.NotNull()
-	nb0, _ := notNull.Col("v").Elem(0).Bool()
-	nb1, _ := notNull.Col("v").Elem(1).Bool()
+	nb0, _ := notNull.Col("v").BoolAt(0)
+	nb1, _ := notNull.Col("v").BoolAt(1)
 	if !nb0 || nb1 {
 		t.Errorf("NotNull: expected [true false true], got [%v %v]", nb0, nb1)
 	}
@@ -114,23 +114,23 @@ func TestDataFrame_ValueCounts(t *testing.T) {
 		t.Fatal(vc.Err)
 	}
 	// First row should be "a" with count 3 (descending).
-	if vc.Col("cat").Elem(0).String() != "a" {
-		t.Errorf("ValueCounts[0]: expected 'a', got %s", vc.Col("cat").Elem(0).String())
+	if vc.Col("cat").Record(0) != "a" {
+		t.Errorf("ValueCounts[0]: expected 'a', got %s", vc.Col("cat").Record(0))
 	}
-	if vc.Col("count").Elem(0).Float() != 3 {
-		t.Errorf("ValueCounts count[0]: expected 3, got %v", vc.Col("count").Elem(0).Float())
+	if vc.Col("count").FloatAt(0) != 3 {
+		t.Errorf("ValueCounts count[0]: expected 3, got %v", vc.Col("count").FloatAt(0))
 	}
 
 	// Normalize.
 	vcN := df.ValueCounts("cat", true, false)
-	if vcN.Col("proportion").Elem(0).Float() != 0.5 {
-		t.Errorf("ValueCounts normalize[0]: expected 0.5, got %v", vcN.Col("proportion").Elem(0).Float())
+	if vcN.Col("proportion").FloatAt(0) != 0.5 {
+		t.Errorf("ValueCounts normalize[0]: expected 0.5, got %v", vcN.Col("proportion").FloatAt(0))
 	}
 
 	// Ascending.
 	vcA := df.ValueCounts("cat", false, true)
-	if vcA.Col("count").Elem(0).Float() != 1 {
-		t.Errorf("ValueCounts ascending[0]: expected 1, got %v", vcA.Col("count").Elem(0).Float())
+	if vcA.Col("count").FloatAt(0) != 1 {
+		t.Errorf("ValueCounts ascending[0]: expected 1, got %v", vcA.Col("count").FloatAt(0))
 	}
 }
 
@@ -146,16 +146,16 @@ func TestDataFrame_NLargest_NSmallest(t *testing.T) {
 	if top3.Nrow() != 3 {
 		t.Fatalf("NLargest(3) rows: got %d want 3", top3.Nrow())
 	}
-	if top3.Col("v").Elem(0).Float() != 9 {
-		t.Errorf("NLargest[0]: expected 9, got %v", top3.Col("v").Elem(0).Float())
+	if top3.Col("v").FloatAt(0) != 9 {
+		t.Errorf("NLargest[0]: expected 9, got %v", top3.Col("v").FloatAt(0))
 	}
 
 	bot3 := df.NSmallest(3, "v")
 	if bot3.Nrow() != 3 {
 		t.Fatalf("NSmallest(3) rows: got %d want 3", bot3.Nrow())
 	}
-	if bot3.Col("v").Elem(0).Float() != 1 {
-		t.Errorf("NSmallest[0]: expected 1, got %v", bot3.Col("v").Elem(0).Float())
+	if bot3.Col("v").FloatAt(0) != 1 {
+		t.Errorf("NSmallest[0]: expected 1, got %v", bot3.Col("v").FloatAt(0))
 	}
 }
 
@@ -231,8 +231,8 @@ func TestDataFrame_ApplyMap(t *testing.T) {
 		}
 		return v
 	})
-	if out.Col("s").Elem(0).String() != "HELLO" {
-		t.Errorf("ApplyMap: expected HELLO, got %s", out.Col("s").Elem(0).String())
+	if out.Col("s").Record(0) != "HELLO" {
+		t.Errorf("ApplyMap: expected HELLO, got %s", out.Col("s").Record(0))
 	}
 }
 
@@ -246,14 +246,14 @@ func TestDataFrame_Clip_NaN(t *testing.T) {
 	)
 	lo, hi := 2.0, 8.0
 	out := df.Clip(&lo, &hi)
-	if !out.Col("v").Elem(1).IsNA() {
+	if !out.Col("v").IsNA(1) {
 		t.Error("Clip: NaN should be preserved, not clipped")
 	}
-	if out.Col("v").Elem(0).Float() != 2.0 {
-		t.Errorf("Clip[0]: expected 2.0, got %v", out.Col("v").Elem(0).Float())
+	if out.Col("v").FloatAt(0) != 2.0 {
+		t.Errorf("Clip[0]: expected 2.0, got %v", out.Col("v").FloatAt(0))
 	}
-	if out.Col("v").Elem(2).Float() != 8.0 {
-		t.Errorf("Clip[2]: expected 8.0, got %v", out.Col("v").Elem(2).Float())
+	if out.Col("v").FloatAt(2) != 8.0 {
+		t.Errorf("Clip[2]: expected 8.0, got %v", out.Col("v").FloatAt(2))
 	}
 }
 
@@ -267,14 +267,14 @@ func TestDataFrame_ClipColumn(t *testing.T) {
 	if out.Err != nil {
 		t.Fatal(out.Err)
 	}
-	if out.Col("score").Elem(0).Float() != 0 {
-		t.Errorf("ClipColumn[0]: expected 0, got %v", out.Col("score").Elem(0).Float())
+	if out.Col("score").FloatAt(0) != 0 {
+		t.Errorf("ClipColumn[0]: expected 0, got %v", out.Col("score").FloatAt(0))
 	}
-	if out.Col("score").Elem(2).Float() != 10 {
-		t.Errorf("ClipColumn[2]: expected 10, got %v", out.Col("score").Elem(2).Float())
+	if out.Col("score").FloatAt(2) != 10 {
+		t.Errorf("ClipColumn[2]: expected 10, got %v", out.Col("score").FloatAt(2))
 	}
 	// label column unchanged
-	if out.Col("label").Elem(0).String() != "a" {
+	if out.Col("label").Record(0) != "a" {
 		t.Error("ClipColumn: non-target column should be unchanged")
 	}
 }
@@ -288,7 +288,7 @@ func TestDataFrame_Replace(t *testing.T) {
 		series.New([]string{"a", "N/A", "b", "N/A"}, series.String, "v"),
 	)
 	out := df.Replace("N/A", nil)
-	if !out.Col("v").Elem(1).IsNA() || !out.Col("v").Elem(3).IsNA() {
+	if !out.Col("v").IsNA(1) || !out.Col("v").IsNA(3) {
 		t.Error("Replace: expected NaN at positions 1 and 3")
 	}
 }
@@ -299,10 +299,10 @@ func TestDataFrame_ReplaceInColumn(t *testing.T) {
 		series.New([]string{"bad", "ok", "bad"}, series.String, "b"),
 	)
 	out := df.ReplaceInColumn("b", "bad", nil)
-	if !out.Col("b").Elem(0).IsNA() {
+	if !out.Col("b").IsNA(0) {
 		t.Error("ReplaceInColumn: b[0] should be NaN")
 	}
-	if out.Col("a").Elem(0).String() != "x" {
+	if out.Col("a").Record(0) != "x" {
 		t.Error("ReplaceInColumn: column a should be unchanged")
 	}
 }
@@ -341,7 +341,7 @@ func TestDataFrame_Between_Valid(t *testing.T) {
 	if mask.Err != nil {
 		t.Fatal(mask.Err)
 	}
-	b, _ := mask.Elem(1).Bool()
+	b, _ := mask.BoolAt(1)
 	if !b {
 		t.Error("Between: 20 should be in [15,25]")
 	}
@@ -365,8 +365,8 @@ func TestDataFrame_IsIn(t *testing.T) {
 	if mask.Err != nil {
 		t.Fatal(mask.Err)
 	}
-	b0, _ := mask.Elem(0).Bool()
-	b2, _ := mask.Elem(2).Bool()
+	b0, _ := mask.BoolAt(0)
+	b2, _ := mask.BoolAt(2)
 	if !b0 || b2 {
 		t.Errorf("IsIn: expected [true true false], got [%v _ %v]", b0, b2)
 	}
@@ -401,8 +401,8 @@ func TestDataFrame_ExplodeOn(t *testing.T) {
 	if out.Nrow() != 5 {
 		t.Fatalf("ExplodeOn rows: got %d want 5", out.Nrow())
 	}
-	if out.Col("tags").Elem(0).String() != "a" {
-		t.Errorf("ExplodeOn[0]: got %s want a", out.Col("tags").Elem(0).String())
+	if out.Col("tags").Record(0) != "a" {
+		t.Errorf("ExplodeOn[0]: got %s want a", out.Col("tags").Record(0))
 	}
 }
 
@@ -422,14 +422,14 @@ func TestSeries_Clip_NaN(t *testing.T) {
 	s := series.New([]interface{}{-5.0, nil, 15.0}, series.Float, "v")
 	lo, hi := 0.0, 10.0
 	out := s.Clip(&lo, &hi)
-	if !out.Elem(1).IsNA() {
+	if !out.IsNA(1) {
 		t.Error("Series.Clip: NaN should be preserved")
 	}
-	if out.Elem(0).Float() != 0 {
-		t.Errorf("Series.Clip[0]: expected 0, got %v", out.Elem(0).Float())
+	if out.FloatAt(0) != 0 {
+		t.Errorf("Series.Clip[0]: expected 0, got %v", out.FloatAt(0))
 	}
-	if out.Elem(2).Float() != 10 {
-		t.Errorf("Series.Clip[2]: expected 10, got %v", out.Elem(2).Float())
+	if out.FloatAt(2) != 10 {
+		t.Errorf("Series.Clip[2]: expected 10, got %v", out.FloatAt(2))
 	}
 }
 
@@ -478,7 +478,7 @@ func TestDataFrame_Resample_AllFreqs(t *testing.T) {
 				t.Fatalf("Resample %s rows: got %d want %d", test.freq, result.Nrow(), len(test.counts))
 			}
 			for i, want := range test.counts {
-				if got := result.Col("v_COUNT").Elem(i).Float(); got != want {
+				if got := result.Col("v_COUNT").FloatAt(i); got != want {
 					t.Fatalf("Resample %s count[%d]: got %v want %v", test.freq, i, got, want)
 				}
 			}
@@ -504,11 +504,11 @@ func TestNumWorkers(t *testing.T) {
 func TestSeries_Abs_NaN(t *testing.T) {
 	s := series.New([]interface{}{-3.0, nil, 4.0}, series.Float, "v")
 	out := s.Abs()
-	if !out.Elem(1).IsNA() {
+	if !out.IsNA(1) {
 		t.Error("Abs: NaN should be preserved")
 	}
-	if out.Elem(0).Float() != 3.0 {
-		t.Errorf("Abs[0]: expected 3.0, got %v", out.Elem(0).Float())
+	if out.FloatAt(0) != 3.0 {
+		t.Errorf("Abs[0]: expected 3.0, got %v", out.FloatAt(0))
 	}
 }
 
@@ -519,7 +519,7 @@ func TestSeries_Abs_NaN(t *testing.T) {
 func TestSeries_Round_NaN(t *testing.T) {
 	s := series.New([]interface{}{1.5, nil, 2.5}, series.Float, "v")
 	out := s.Round(0)
-	if !out.Elem(1).IsNA() {
+	if !out.IsNA(1) {
 		t.Error("Round: NaN should be preserved")
 	}
 }
@@ -602,7 +602,7 @@ func TestScanCSV_DeepCopy(t *testing.T) {
 	var all []string
 	err := ScanCSV(strings.NewReader(csv), 2, func(batch DataFrame) error {
 		for i := 0; i < batch.Nrow(); i++ {
-			all = append(all, batch.Col("a").Elem(i).String())
+			all = append(all, batch.Col("a").Record(i))
 		}
 		return nil
 	})

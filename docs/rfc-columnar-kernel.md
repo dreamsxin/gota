@@ -9,6 +9,11 @@ Revised: 2026-08-28 (release plan) - §1 re-anchored to the committed
 benchmark suite; compatibility is dropped (§2, §7): v2.0.0 ships as a clean
 break with no `Elem` adapter, no `Rapply` compat layer, and no in-v1.x
 staging; §3.2, §6, §8, §9.4 updated to match.
+Revised: 2026-08-28 (Milestone 1 landed) - the `v2` branch now stores every
+Series in `column[T]` buffers with validity bitmaps; `Element`/`Elem` and
+`Rapply` were removed in the same step; measured results: Mean 1M Float
+4.9 ms / 8 MB → 0.13 ms / 0 allocs, Copy 100k Int 252 µs / 1.6 MB →
+90 µs / 0.8 MB.
 Scope: Series storage layout, batch kernels, DType system, and the v2.0.0
 release path. This is a design document, not a feature list; every
 performance claim below is measured on the v1 implementation by the
@@ -155,10 +160,13 @@ CHANGELOG plus a migration guide:
 The milestones below are the implementation order on the v2 branch; they are
 reviewable units, not independently shipped releases:
 
-1. **Milestone 1 - buffers.** Replace `Elements` implementations with column
-   buffers behind the revised Series API. Benchmarks must show no regression
-   against the §1 baseline and memory should drop ~2x.
-2. **Milestone 2 - kernels.** Port hot operations (aggregations, filters,
+1. **Milestone 1 - buffers (landed on the v2 branch).** Replace `Elements`
+   implementations with column buffers. Because compatibility is not an
+   obligation, the `Element`/`Elem` surface and `Rapply` were removed in the
+   same step; typed Series accessors (`Val`, `IsNA`, `Record`, `FloatAt`,
+   `IntAt`, `BoolAt`, `TimeAt`) replace them. Benchmarks improved against
+   the §1 baseline and memory dropped ~2x.
+2. **Milestone 2 - kernels.** Port the remaining hot operations (filters,
    sorting, joins) to batch kernels one by one, each with a golden-output
    test derived from v1 expectations except where semantics change
    deliberately. Sorting follows §9.1 (materialize + snapshot view).

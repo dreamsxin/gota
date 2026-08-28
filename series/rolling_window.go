@@ -6,7 +6,7 @@ func newFloatSeries(name string, capacity int) Series {
 	if capacity < 0 {
 		capacity = 0
 	}
-	return Series{Name: name, t: Float, elements: make(floatElements, 0, capacity)}
+	return Series{Name: name, t: Float, elements: newColumnCap[float64](capacity)}
 }
 
 // EWM holds parameters for Exponentially Weighted calculations, mirroring
@@ -42,15 +42,7 @@ func (e EWM) IgnoreNA(v bool) EWM { e.ignoreNA = v; return e }
 
 // Mean returns the exponentially weighted moving average (EWMA).
 func (e EWM) Mean() Series {
-	vals := make([]float64, e.series.Len())
-	for i := 0; i < e.series.Len(); i++ {
-		elem := e.series.Elem(i)
-		if elem.IsNA() {
-			vals[i] = math.NaN()
-		} else {
-			vals[i] = elem.Float()
-		}
-	}
+	vals := floatsNaN(e.series)
 	n := len(vals)
 	s := newFloatSeries("EWM_mean", n)
 	alpha := e.alpha
@@ -131,15 +123,7 @@ func (e EWM) Mean() Series {
 //
 // where weights w_j = (1-α)^(i-j) (adjusted mode).
 func (e EWM) Var() Series {
-	vals := make([]float64, e.series.Len())
-	for i := 0; i < e.series.Len(); i++ {
-		elem := e.series.Elem(i)
-		if elem.IsNA() {
-			vals[i] = math.NaN()
-		} else {
-			vals[i] = elem.Float()
-		}
-	}
+	vals := floatsNaN(e.series)
 	alpha := e.alpha
 	n := len(vals)
 	s := newFloatSeries("EWM_var", n)
@@ -186,15 +170,17 @@ func (e EWM) Var() Series {
 // Std returns the exponentially weighted standard deviation (sqrt of EWM Var).
 func (e EWM) Std() Series {
 	v := e.Var()
-	s := newFloatSeries("EWM_std", v.Len())
-	for i := 0; i < v.Len(); i++ {
-		elem := v.Elem(i)
-		if elem.IsNA() {
-			s.Append(math.NaN())
+	vals := floatsNaN(v)
+	out := make([]float64, len(vals))
+	for i, fv := range vals {
+		if math.IsNaN(fv) {
+			out[i] = math.NaN()
 		} else {
-			s.Append(math.Sqrt(elem.Float()))
+			out[i] = math.Sqrt(fv)
 		}
 	}
+	s := FloatsDirect(out)
+	s.Name = "EWM_std"
 	return s
 }
 
@@ -222,20 +208,44 @@ func (r RollingWindow) MinPeriods(n int) RollingWindow {
 	return r
 }
 
-// floatSlice extracts the float64 values of the series once, replacing NaN
-// elements with math.NaN().
+// floatSlice extracts the float64 values of the series once, replacing
+// missing elements with math.NaN().
 func (r RollingWindow) floatSlice() []float64 {
-	n := r.series.Len()
-	vals := make([]float64, n)
-	for i := 0; i < n; i++ {
-		elem := r.series.Elem(i)
-		if elem.IsNA() {
-			vals[i] = math.NaN()
-		} else {
-			vals[i] = elem.Float()
+	return floatsNaN(r.series)
+}
+
+// floatsNaN materializes the series values as float64 with missing entries
+// represented as math.NaN(), walking the column buffers directly.
+func floatsNaN(s Series) []float64 {
+	switch elems := s.elements.(type) {
+	case floatElements:
+		out := make([]float64, len(elems.data))
+		copy(out, elems.data)
+		if elems.validity != nil {
+			for i := range out {
+				if !elems.isValid(i) {
+					out[i] = math.NaN()
+				}
+			}
 		}
+		return out
+	case intElements:
+		out := make([]float64, len(elems.data))
+		for i, v := range elems.data {
+			if elems.isValid(i) {
+				out[i] = float64(v)
+			} else {
+				out[i] = math.NaN()
+			}
+		}
+		return out
+	default:
+		out := make([]float64, s.Len())
+		for i := range out {
+			out[i] = s.FloatAt(i)
+		}
+		return out
 	}
-	return vals
 }
 
 // hasEnough returns true if the window [start,end) has at least minPeriods
