@@ -1,0 +1,356 @@
+package dataframe
+
+import (
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/dreamsxin/gota/v2/series"
+	"github.com/xuri/excelize/v2"
+)
+
+func openFile(path string) (*os.File, error)   { return os.Open(path) }
+func createFile(path string) (*os.File, error) { return os.Create(path) }
+
+// WithSheet returns a LoadOption that selects a specific sheet by name when
+// reading XLSX files. If not specified, the first sheet is used.
+//
+// Example:
+//
+//	df := dataframe.ReadXLSXFile("data.xlsx", dataframe.WithSheet("Sheet2"))
+func WithSheet(name string) LoadOption {
+	return func(cfg *loadOptions) {
+		cfg.sheet = name
+	}
+}
+
+// ReadXLSX reads the first (or named) sheet of an XLSX file from r and
+// returns a DataFrame. The first row is used as column headers by default.
+//
+// Options:
+//   - HasHeader(bool)     – whether the first row contains column names (default true)
+//   - Names(...)          – override column names
+//   - WithTypes(map)      – specify column types explicitly
+//   - NaNValues([]string) – additional strings to treat as NaN
+//   - WithSheet(name)     – sheet name to read (default: first sheet)
+func ReadXLSX(r io.Reader, options ...LoadOption) DataFrame {
+	cfg := loadOptions{
+		defaultType: series.String,
+		detectTypes: true,
+		hasHeader:   true,
+		nanValues:   []string{"NA", "NaN", "<nil>", ""},
+	}
+	for _, opt := range options {
+		opt(&cfg)
+	}
+
+	f, err := excelize.OpenReader(r)
+	if err != nil {
+		return DataFrame{Err: fmt.Errorf("ReadXLSX: %v", err)}
+	}
+	defer f.Close()
+
+	sheetName := cfg.sheet
+	if sheetName == "" {
+		sheets := f.GetSheetList()
+		if len(sheets) == 0 {
+			return DataFrame{Err: withSentinel("ReadXLSX: workbook has no sheets", ErrEmptyDataFrame)}
+		}
+		sheetName = sheets[0]
+	}
+
+	return readXLSXSheet(f, sheetName, options...)
+}
+
+func readXLSXSheet(f *excelize.File, sheetName string, options ...LoadOption) DataFrame {
+	rows, err := f.GetRows(sheetName)
+	if err != nil {
+		return DataFrame{Err: fmt.Errorf("ReadXLSX: %v", err)}
+	}
+	if len(rows) == 0 {
+		return DataFrame{Err: withSentinel(fmt.Sprintf("ReadXLSX: sheet %q is empty", sheetName), ErrEmptyDataFrame)}
+	}
+
+	// Normalise all rows to the same width.
+	maxCols := 0
+	for _, row := range rows {
+		if len(row) > maxCols {
+			maxCols = len(row)
+		}
+	}
+	for i := range rows {
+		for len(rows[i]) < maxCols {
+			rows[i] = append(rows[i], "")
+		}
+	}
+
+	return LoadRecords(rows, options...)
+}
+
+// ReadXLSXSheets reads every sheet in an XLSX file into a map keyed by sheet
+// name. This mirrors pandas read_excel(sheet_name=None).
+func ReadXLSXSheets(r io.Reader, options ...LoadOption) (map[string]DataFrame, error) {
+	f, err := excelize.OpenReader(r)
+	if err != nil {
+		return nil, fmt.Errorf("ReadXLSXSheets: %v", err)
+	}
+	defer f.Close()
+
+	sheets := f.GetSheetList()
+	if len(sheets) == 0 {
+		return nil, fmt.Errorf("ReadXLSXSheets: workbook has no sheets")
+	}
+
+	out := make(map[string]DataFrame, len(sheets))
+	for _, sheetName := range sheets {
+		df := readXLSXSheet(f, sheetName, options...)
+		if df.Err != nil {
+			return nil, fmt.Errorf("ReadXLSXSheets: sheet %q: %v", sheetName, df.Err)
+		}
+		out[sheetName] = df
+	}
+	return out, nil
+}
+
+// WriteXLSX writes the DataFrame to w as an XLSX file.  The first row
+// contains the column headers.
+//
+// Options:
+//   - WriteHeader(bool) – whether to write the header row (default true)
+//   - WithSheetName(name) – sheet name (default "Sheet1")
+func (df DataFrame) WriteXLSX(w io.Writer, options ...WriteOption) error {
+	if df.Err != nil {
+		return df.Err
+	}
+	cfg := writeOptions{writeHeader: true}
+	for _, opt := range options {
+		opt(&cfg)
+	}
+
+	f := excelize.NewFile()
+	defer f.Close()
+
+	sheetName := cfg.sheetName
+	if sheetName == "" {
+		sheetName = "Sheet1"
+	}
+	if sheetName != "Sheet1" {
+		if err := f.SetSheetName("Sheet1", sheetName); err != nil {
+			return fmt.Errorf("WriteXLSX: sheet name: %v", err)
+		}
+	}
+
+	if err := writeXLSXToSheet(f, sheetName, df, cfg); err != nil {
+		return fmt.Errorf("WriteXLSX: %w", err)
+	}
+
+	_, err := f.WriteTo(w)
+	return err
+}
+
+// ReadXLSXFile is a convenience wrapper that opens a file path and calls ReadXLSX.
+func ReadXLSXFile(path string, options ...LoadOption) DataFrame {
+	f, err := openFile(path)
+	if err != nil {
+		return DataFrame{Err: fmt.Errorf("ReadXLSXFile: %v", err)}
+	}
+	defer f.Close()
+	return ReadXLSX(f, options...)
+}
+
+// ReadXLSXFileSheets is a convenience wrapper that opens a file path and calls
+// ReadXLSXSheets.
+func ReadXLSXFileSheets(path string, options ...LoadOption) (map[string]DataFrame, error) {
+	f, err := openFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("ReadXLSXFileSheets: %v", err)
+	}
+	defer f.Close()
+	return ReadXLSXSheets(f, options...)
+}
+
+// WriteXLSXFile is a convenience wrapper that creates/truncates a file and calls WriteXLSX.
+func (df DataFrame) WriteXLSXFile(path string, options ...WriteOption) error {
+	f, err := createFile(path)
+	if err != nil {
+		return fmt.Errorf("WriteXLSXFile: %w", err)
+	}
+	defer f.Close()
+	return df.WriteXLSX(f, options...)
+}
+
+// WriteXLSXSheet writes the DataFrame to a specific sheet in an existing
+// excelize.File. This allows building multi-sheet workbooks.
+//
+// Example:
+//
+//	f := excelize.NewFile()
+//	defer f.Close()
+//	df1.WriteXLSXSheet(f, "Sales")
+//	df2.WriteXLSXSheet(f, "Inventory")
+//	f.SaveAs("report.xlsx")
+func (df DataFrame) WriteXLSXSheet(f interface {
+	SetCellValue(string, string, interface{}) error
+	NewSheet(string) (int, error)
+}, sheetName string, options ...WriteOption) error {
+	if df.Err != nil {
+		return df.Err
+	}
+	cfg := writeOptions{writeHeader: true}
+	for _, opt := range options {
+		opt(&cfg)
+	}
+
+	xl, ok := f.(*excelize.File)
+	if !ok {
+		return fmt.Errorf("WriteXLSXSheet: f must be *excelize.File")
+	}
+
+	// Create sheet if it doesn't exist.
+	idx, _ := xl.GetSheetIndex(sheetName)
+	if idx == -1 {
+		if _, err := xl.NewSheet(sheetName); err != nil {
+			return fmt.Errorf("WriteXLSXSheet: %v", err)
+		}
+	}
+
+	if err := writeXLSXToSheet(xl, sheetName, df, cfg); err != nil {
+		return fmt.Errorf("WriteXLSXSheet: %v", err)
+	}
+	return nil
+}
+
+func writeXLSXToSheet(f *excelize.File, sheetName string, df DataFrame, cfg writeOptions) error {
+	records := df.Records()
+	startRow := 0
+	if !cfg.writeHeader {
+		startRow = 1
+	}
+	for i := startRow; i < len(records); i++ {
+		for j, cell := range records[i] {
+			coord, err := excelize.CoordinatesToCellName(j+1, i-startRow+1)
+			if err != nil {
+				return err
+			}
+			if err := f.SetCellValue(sheetName, coord, cell); err != nil {
+				return err
+			}
+		}
+	}
+	return applyXLSXStyles(f, sheetName, df, cfg)
+}
+
+func applyXLSXStyles(f *excelize.File, sheetName string, df DataFrame, cfg writeOptions) error {
+	if cfg.xlsxBoldHeader && cfg.writeHeader && df.Ncol() > 0 {
+		styleID, err := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
+		if err != nil {
+			return err
+		}
+		endCell, err := excelize.CoordinatesToCellName(df.Ncol(), 1)
+		if err != nil {
+			return err
+		}
+		if err := f.SetCellStyle(sheetName, "A1", endCell, styleID); err != nil {
+			return err
+		}
+	}
+
+	nameToIndex := make(map[string]int, df.Ncol())
+	for i, name := range df.Names() {
+		nameToIndex[name] = i + 1
+	}
+
+	for name, width := range cfg.xlsxColumnWidths {
+		colIdx, ok := nameToIndex[name]
+		if !ok {
+			return withSentinel(fmt.Sprintf("unknown XLSX column %q", name), ErrColumnNotFound)
+		}
+		colName, err := excelize.ColumnNumberToName(colIdx)
+		if err != nil {
+			return err
+		}
+		if err := f.SetColWidth(sheetName, colName, colName, width); err != nil {
+			return err
+		}
+	}
+
+	dataStart := 1
+	if cfg.writeHeader {
+		dataStart = 2
+	}
+	for name, format := range cfg.xlsxNumberFormats {
+		colIdx, ok := nameToIndex[name]
+		if !ok {
+			return withSentinel(fmt.Sprintf("unknown XLSX column %q", name), ErrColumnNotFound)
+		}
+		if df.Nrow() == 0 {
+			continue
+		}
+		startCell, err := excelize.CoordinatesToCellName(colIdx, dataStart)
+		if err != nil {
+			return err
+		}
+		endCell, err := excelize.CoordinatesToCellName(colIdx, dataStart+df.Nrow()-1)
+		if err != nil {
+			return err
+		}
+		numberFormat := format
+		styleID, err := f.NewStyle(&excelize.Style{CustomNumFmt: &numberFormat})
+		if err != nil {
+			return err
+		}
+		if err := f.SetCellStyle(sheetName, startCell, endCell, styleID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// WriteXLSXMultiSheet writes multiple DataFrames to separate sheets in a
+// single XLSX file. sheets is a slice of (sheetName, DataFrame) pairs.
+//
+// Example:
+//
+//	err := dataframe.WriteXLSXMultiSheet(w,
+//	    dataframe.SheetData{"Sales", salesDF},
+//	    dataframe.SheetData{"Inventory", invDF},
+//	)
+type SheetData struct {
+	Name string
+	DF   DataFrame
+}
+
+func WriteXLSXMultiSheet(w io.Writer, sheets ...SheetData) error {
+	if len(sheets) == 0 {
+		return fmt.Errorf("WriteXLSXMultiSheet: no sheets provided")
+	}
+	f := excelize.NewFile()
+	defer f.Close()
+
+	for i, sd := range sheets {
+		if i == 0 {
+			// Rename the default Sheet1.
+			if err := f.SetSheetName("Sheet1", sd.Name); err != nil {
+				return fmt.Errorf("WriteXLSXMultiSheet: rename sheet: %v", err)
+			}
+		} else {
+			if _, err := f.NewSheet(sd.Name); err != nil {
+				return fmt.Errorf("WriteXLSXMultiSheet: new sheet %q: %v", sd.Name, err)
+			}
+		}
+		records := sd.DF.Records()
+		for ri, row := range records {
+			for ci, cell := range row {
+				coord, err := excelize.CoordinatesToCellName(ci+1, ri+1)
+				if err != nil {
+					return fmt.Errorf("WriteXLSXMultiSheet: %v", err)
+				}
+				if err := f.SetCellValue(sd.Name, coord, cell); err != nil {
+					return fmt.Errorf("WriteXLSXMultiSheet: %v", err)
+				}
+			}
+		}
+	}
+	_, err := f.WriteTo(w)
+	return err
+}

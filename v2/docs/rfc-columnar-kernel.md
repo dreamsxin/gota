@@ -9,6 +9,12 @@ Revised: 2026-08-28 (release plan) - §1 re-anchored to the committed
 benchmark suite; compatibility is dropped (§2, §7): v2.0.0 ships as a clean
 break with no `Elem` adapter, no `Rapply` compat layer, and no in-v1.x
 staging; §3.2, §6, §8, §9.4 updated to match.
+Revised: 2026-08-28 (Milestone 1 landed) - the `v2/` major-version
+subdirectory (module `github.com/dreamsxin/gota/v2`) now stores every
+Series in `column[T]` buffers with validity bitmaps; `Element`/`Elem` and
+`Rapply` were removed in the same step; measured results: Mean 1M Float
+4.9 ms / 8 MB → 0.13 ms / 0 allocs, Copy 100k Int 252 µs / 1.6 MB →
+90 µs / 0.8 MB.
 Scope: Series storage layout, batch kernels, DType system, and the v2.0.0
 release path. This is a design document, not a feature list; every
 performance claim below is measured on the v1 implementation by the
@@ -138,11 +144,12 @@ Rules:
 
 ## 7. Release plan: v2.0.0 as a clean break
 
-Compatibility with v1 is not a constraint (§2). The kernel lands on a v2
-development branch and ships as v2.0.0 under the module path
-`github.com/dreamsxin/gota/v2`; v1.x receives fixes only until that tag.
-All breaking changes ship together in that one release and are listed in the
-CHANGELOG plus a migration guide:
+Compatibility with v1 is not a constraint (§2). The kernel is developed in
+the repository's `v2/` major-version subdirectory under the module path
+`github.com/dreamsxin/gota/v2` and ships as v2.0.0 via a `v2/v2.0.0` tag;
+v1.x at the repository root receives fixes only until that tag. All breaking
+changes ship together in that one release and are listed in the CHANGELOG
+plus a migration guide:
 
 - The `Element`/`Elements` interfaces and `Elem(i)` are removed (§3.2).
 - `Rapply`/`RapplyParallel` are removed; UDFs use `BatchTransform` and
@@ -152,13 +159,16 @@ CHANGELOG plus a migration guide:
 - Adapters (Excel/Parquet/SQL) split into submodules per the ROADMAP
   decision.
 
-The milestones below are the implementation order on the v2 branch; they are
-reviewable units, not independently shipped releases:
+The milestones below are the implementation order inside the `v2/`
+directory; they are reviewable units, not independently shipped releases:
 
-1. **Milestone 1 - buffers.** Replace `Elements` implementations with column
-   buffers behind the revised Series API. Benchmarks must show no regression
-   against the §1 baseline and memory should drop ~2x.
-2. **Milestone 2 - kernels.** Port hot operations (aggregations, filters,
+1. **Milestone 1 - buffers (landed in the `v2/` directory).** Replace
+   `Elements` implementations with column buffers. Because compatibility is
+   not an obligation, the `Element`/`Elem` surface and `Rapply` were removed
+   in the same step; typed Series accessors (`Val`, `IsNA`, `Record`,
+   `FloatAt`, `IntAt`, `BoolAt`, `TimeAt`) replace them. Benchmarks improved
+   against the §1 baseline and memory dropped ~2x.
+2. **Milestone 2 - kernels.** Port the remaining hot operations (filters,
    sorting, joins) to batch kernels one by one, each with a golden-output
    test derived from v1 expectations except where semantics change
    deliberately. Sorting follows §9.1 (materialize + snapshot view).
@@ -168,9 +178,9 @@ reviewable units, not independently shipped releases:
    DType; Schema exposes it. The chain-local intern pool (§9.2) and
    byte-budget chunking (§9.3) land with the Dictionary DType, where they
    are first needed.
-4. **Milestone 4 - release.** Bump the module path to `/v2`, split adapters
-   into submodules, publish the CHANGELOG entry and migration guide, tag
-   v2.0.0.
+4. **Milestone 4 - release.** The `/v2` module path is already in place
+   with the directory layout; split adapters into submodules, publish the
+   CHANGELOG entry and migration guide, tag `v2/v2.0.0`.
 
 ## 8. Success criteria
 

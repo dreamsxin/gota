@@ -45,17 +45,6 @@ jobs:
       - name: test
         run: go test -count=1 ./...
 
-      # The v2 module lives in the v2/ major-version subdirectory; gofmt
-      # above already covers it, but vet/build/test need the module flag.
-      - name: go vet (v2)
-        run: go vet -C v2 ./...
-
-      - name: build (v2)
-        run: go build -C v2 ./...
-
-      - name: test (v2)
-        run: go test -C v2 -count=1 ./...
-
   race:
     name: race detector (ubuntu, CGO)
     runs-on: ubuntu-latest
@@ -72,36 +61,22 @@ jobs:
           CGO_ENABLED: 1
         run: go test -race -count=1 ./...
 
-      - name: go test -race (v2)
-        env:
-          CGO_ENABLED: 1
-        run: go test -C v2 -race -count=1 ./...
-
   fuzz:
-    name: fuzz smoke (${{ matrix.line }} ${{ matrix.target }})
+    name: fuzz smoke (${{ matrix.target }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { line: v1, dir: ., pkg: ./dataframe, target: FuzzQuery }
-          - { line: v1, dir: ., pkg: ./dataframe, target: FuzzReadCSVDetectDelimiter }
-          - { line: v1, dir: ., pkg: ./dataframe, target: FuzzParquetRoundTrip }
-          - { line: v1, dir: ., pkg: ./dataframe, target: FuzzInnerJoinCount }
-          - { line: v1, dir: ., pkg: ./dataframe, target: FuzzInnerJoinCompositeCount }
-          - { line: v1, dir: ., pkg: ./dataframe, target: FuzzLeftJoinCount }
-          - { line: v1, dir: ., pkg: ./dataframe, target: FuzzIndexLoc }
-          - { line: v1, dir: ., pkg: ./dataframe, target: FuzzMultiIndexLoc }
-          - { line: v1, dir: ., pkg: ./series, target: FuzzBatchConvertStrings }
-          - { line: v2, dir: v2, pkg: ./dataframe, target: FuzzQuery }
-          - { line: v2, dir: v2, pkg: ./dataframe, target: FuzzReadCSVDetectDelimiter }
-          - { line: v2, dir: v2, pkg: ./dataframe, target: FuzzParquetRoundTrip }
-          - { line: v2, dir: v2, pkg: ./dataframe, target: FuzzInnerJoinCount }
-          - { line: v2, dir: v2, pkg: ./dataframe, target: FuzzInnerJoinCompositeCount }
-          - { line: v2, dir: v2, pkg: ./dataframe, target: FuzzLeftJoinCount }
-          - { line: v2, dir: v2, pkg: ./dataframe, target: FuzzIndexLoc }
-          - { line: v2, dir: v2, pkg: ./dataframe, target: FuzzMultiIndexLoc }
-          - { line: v2, dir: v2, pkg: ./series, target: FuzzBatchConvertStrings }
+          - { pkg: ./dataframe, target: FuzzQuery }
+          - { pkg: ./dataframe, target: FuzzReadCSVDetectDelimiter }
+          - { pkg: ./dataframe, target: FuzzParquetRoundTrip }
+          - { pkg: ./dataframe, target: FuzzInnerJoinCount }
+          - { pkg: ./dataframe, target: FuzzInnerJoinCompositeCount }
+          - { pkg: ./dataframe, target: FuzzLeftJoinCount }
+          - { pkg: ./dataframe, target: FuzzIndexLoc }
+          - { pkg: ./dataframe, target: FuzzMultiIndexLoc }
+          - { pkg: ./series, target: FuzzBatchConvertStrings }
     steps:
       - uses: actions/checkout@v4
 
@@ -117,9 +92,9 @@ jobs:
       # runner; retry once. Real crashers fail both runs.
       - name: fuzz ${{ matrix.target }}
         run: |
-          if ! go test -C ${{ matrix.dir }} -run='^$' -fuzz='^${{ matrix.target }}$' -fuzztime=60s ${{ matrix.pkg }}; then
+          if ! go test -run='^$' -fuzz='^${{ matrix.target }}$' -fuzztime=60s ${{ matrix.pkg }}; then
             echo "::warning::retrying ${{ matrix.target }} after fuzz shutdown flake"
-            go test -C ${{ matrix.dir }} -run='^$' -fuzz='^${{ matrix.target }}$' -fuzztime=60s ${{ matrix.pkg }}
+            go test -run='^$' -fuzz='^${{ matrix.target }}$' -fuzztime=60s ${{ matrix.pkg }}
           fi
 
   docs:
@@ -138,9 +113,6 @@ jobs:
       - name: doc anchors
         run: go test -v ./internal/doccheck/
 
-      - name: doc anchors (v2)
-        run: go test -C v2 -v ./internal/doccheck/
-
   release-checklist:
     name: release checklist
     runs-on: ubuntu-latest
@@ -152,8 +124,7 @@ jobs:
 
       # The most recent tag must have a dated CHANGELOG heading before a
       # release is considered complete. Pre-1.1.0 patch lines were
-      # consolidated under the 1.0.0 entry and are not checked. v2 releases
-      # use v2/vX.Y.Z tags checked against v2/CHANGELOG.md.
+      # consolidated under the 1.0.0 entry and are not checked.
       - name: latest tag has CHANGELOG entry
         shell: bash
         run: |
@@ -166,21 +137,6 @@ jobs:
           echo "latest tag: $latest"
           if ! grep -qE "^## \[$ver\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
             echo "$latest has no dated '## [$ver] - YYYY-MM-DD' heading in CHANGELOG.md" >&2
-            exit 1
-          fi
-
-      - name: latest v2 tag has CHANGELOG entry
-        shell: bash
-        run: |
-          latest=$(git tag -l 'v2/*' | grep -E '^v2/v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
-          if [ -z "$latest" ]; then
-            echo "no v2 version tags yet; skipping"
-            exit 0
-          fi
-          ver="${latest#v2/v}"
-          echo "latest v2 tag: $latest"
-          if ! grep -qE "^## \[$ver\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" v2/CHANGELOG.md; then
-            echo "$latest has no dated '## [$ver] - YYYY-MM-DD' heading in v2/CHANGELOG.md" >&2
             exit 1
           fi
 
@@ -208,8 +164,6 @@ jobs:
       - name: run benchmarks
         run: |
           go test -run='^$' -bench=. -benchmem -count=6 ./... | tee bench-current.txt
-          go test -C v2 -run='^$' -bench=. -benchmem -count=6 ./... | tee bench-current-v2.txt
-          cat bench-current-v2.txt >> bench-current.txt
 
       # Informational only: runner hardware varies, so regressions are
       # reported in the job log rather than failing the build.

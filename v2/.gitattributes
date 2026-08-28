@@ -1,0 +1,7 @@
+# Normalize line endings to LF on checkout for every platform so that
+# gofmt checks behave identically on Windows runners (where the default
+# core.autocrlf=true would otherwise check out CRLF copies).
+* text=auto eol=lf
+
+# Go fuzz corpus files must keep their exact bytes
+**/testdata/fuzz/** -text

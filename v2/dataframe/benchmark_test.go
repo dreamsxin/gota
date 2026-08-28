@@ -1,0 +1,374 @@
+package dataframe_test
+
+import (
+	"math/rand"
+	"strconv"
+	"testing"
+
+	"github.com/dreamsxin/gota/v2/dataframe"
+	"github.com/dreamsxin/gota/v2/series"
+)
+
+func generateSeries(n, rep int) (data []series.Series) {
+	r := rand.New(rand.NewSource(100))
+	for j := 0; j < rep; j++ {
+		var is []int
+		var bs []bool
+		var fs []float64
+		var ss []string
+		for i := 0; i < n; i++ {
+			is = append(is, r.Int())
+		}
+		for i := 0; i < n; i++ {
+			fs = append(fs, r.Float64())
+		}
+		for i := 0; i < n; i++ {
+			ss = append(ss, strconv.Itoa(r.Int()))
+		}
+		for i := 0; i < n; i++ {
+			roll := r.Intn(2)
+			b := false
+			if roll == 1 {
+				b = true
+			}
+			bs = append(bs, b)
+		}
+		data = append(data, series.Ints(is))
+		data = append(data, series.Bools(bs))
+		data = append(data, series.Floats(fs))
+		data = append(data, series.Strings(ss))
+	}
+	return
+}
+
+func generateIntsN(n, k int) (data []int) {
+	for i := 0; i < n; i++ {
+		data = append(data, rand.Intn(k))
+	}
+	return
+}
+
+func BenchmarkNew(b *testing.B) {
+	table := []struct {
+		name string
+		data []series.Series
+	}{
+		{
+			"100000x4",
+			generateSeries(100000, 1),
+		},
+		{
+			"100000x40",
+			generateSeries(100000, 10),
+		},
+		{
+			"100000x400",
+			generateSeries(100000, 100),
+		},
+		{
+			"1000x40",
+			generateSeries(1000, 10),
+		},
+		{
+			"1000x4000",
+			generateSeries(1000, 1000),
+		},
+		{
+			"1000x40000",
+			generateSeries(1000, 10000),
+		},
+	}
+	for _, test := range table {
+		b.Run(test.name, func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				dataframe.New(test.data...)
+			}
+		})
+	}
+}
+
+func BenchmarkDataFrame_Arrange(b *testing.B) {
+	data := dataframe.New(generateSeries(100000, 5)...)
+	table := []struct {
+		name string
+		data dataframe.DataFrame
+		key  []dataframe.Order
+	}{
+		{
+			"100000x20_1",
+			data,
+			[]dataframe.Order{dataframe.Sort("X0")},
+		},
+		{
+			"100000x20_2",
+			data,
+			[]dataframe.Order{
+				dataframe.Sort("X0"),
+				dataframe.Sort("X1"),
+			},
+		},
+		{
+			"100000x20_3",
+			data,
+			[]dataframe.Order{
+				dataframe.Sort("X0"),
+				dataframe.Sort("X1"),
+				dataframe.Sort("X2"),
+			},
+		},
+	}
+	for _, test := range table {
+		b.Run(test.name, func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				test.data.Arrange(test.key...)
+			}
+		})
+	}
+}
+
+func BenchmarkDataFrame_Subset(b *testing.B) {
+	b.ReportAllocs()
+	data1000x20 := dataframe.New(generateSeries(1000, 5)...)
+	data1000x200 := dataframe.New(generateSeries(1000, 50)...)
+	data1000x2000 := dataframe.New(generateSeries(1000, 500)...)
+	data100000x20 := dataframe.New(generateSeries(100000, 5)...)
+	data1000000x20 := dataframe.New(generateSeries(1000000, 5)...)
+	idx10 := generateIntsN(10, 10)
+	idx100 := generateIntsN(100, 100)
+	idx1000 := generateIntsN(1000, 1000)
+	idx10000 := generateIntsN(10000, 10000)
+	idx100000 := generateIntsN(100000, 100000)
+	idx1000000 := generateIntsN(1000000, 1000000)
+	table := []struct {
+		name    string
+		data    dataframe.DataFrame
+		indexes interface{}
+	}{
+		{
+			"1000000x20_100",
+			data1000000x20,
+			idx100,
+		},
+		{
+			"1000000x20_1000",
+			data1000000x20,
+			idx1000,
+		},
+		{
+			"1000000x20_10000",
+			data1000000x20,
+			idx10000,
+		},
+		{
+			"1000000x20_100000",
+			data1000000x20,
+			idx100000,
+		},
+		{
+			"1000000x20_1000000",
+			data1000000x20,
+			idx1000000,
+		},
+		{
+			"100000x20_100",
+			data100000x20,
+			idx100,
+		},
+		{
+			"100000x20_1000",
+			data100000x20,
+			idx1000,
+		},
+		{
+			"100000x20_10000",
+			data100000x20,
+			idx10000,
+		},
+		{
+			"100000x20_100000",
+			data100000x20,
+			idx100000,
+		},
+		{
+			"1000x20_10",
+			data1000x20,
+			idx10,
+		},
+		{
+			"1000x20_100",
+			data1000x20,
+			idx100,
+		},
+		{
+			"1000x20_1000",
+			data1000x20,
+			idx1000,
+		},
+		{
+			"1000x200_10",
+			data1000x200,
+			idx10,
+		},
+		{
+			"1000x200_100",
+			data1000x200,
+			idx100,
+		},
+		{
+			"1000x200_1000",
+			data1000x200,
+			idx1000,
+		},
+		{
+			"1000x2000_10",
+			data1000x2000,
+			idx10,
+		},
+		{
+			"1000x2000_100",
+			data1000x2000,
+			idx100,
+		},
+		{
+			"1000x2000_1000",
+			data1000x2000,
+			idx1000,
+		},
+	}
+	for _, test := range table {
+		b.Run(test.name, func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				test.data.Subset(test.indexes)
+			}
+		})
+	}
+}
+
+func BenchmarkDataFrame_GroupByAggregation(b *testing.B) {
+	n := 100000
+	keys := make([]string, n)
+	values := make([]float64, n)
+	for i := 0; i < n; i++ {
+		keys[i] = "k" + strconv.Itoa(i%100)
+		values[i] = float64(i % 1000)
+	}
+	df := dataframe.New(
+		series.New(keys, series.String, "key"),
+		series.New(values, series.Float, "value"),
+	)
+
+	b.Run("GroupByOnly", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			df.GroupBy("key")
+		}
+	})
+	b.Run("GroupBySum", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			groups := df.GroupBy("key")
+			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_SUM}, []string{"value"})
+		}
+	})
+	b.Run("GroupByMax", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			groups := df.GroupBy("key")
+			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_MAX}, []string{"value"})
+		}
+	})
+	b.Run("AggregationOnly", func(b *testing.B) {
+		groups := df.GroupBy("key")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_SUM}, []string{"value"})
+		}
+	})
+	b.Run("AggregationOnlyMax", func(b *testing.B) {
+		groups := df.GroupBy("key")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_MAX}, []string{"value"})
+		}
+	})
+	b.Run("AggregationOnlyManySameColumn", func(b *testing.B) {
+		groups := df.GroupBy("key")
+		typs := []dataframe.AggregationType{
+			dataframe.Aggregation_SUM,
+			dataframe.Aggregation_MEAN,
+			dataframe.Aggregation_MAX,
+			dataframe.Aggregation_MIN,
+			dataframe.Aggregation_COUNT,
+		}
+		cols := []string{"value", "value", "value", "value", "value"}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			groups.Aggregation(typs, cols)
+		}
+	})
+	b.Run("AggregationOnlySameColumnSumMeanCount", func(b *testing.B) {
+		groups := df.GroupBy("key")
+		typs := []dataframe.AggregationType{
+			dataframe.Aggregation_SUM,
+			dataframe.Aggregation_MEAN,
+			dataframe.Aggregation_COUNT,
+		}
+		cols := []string{"value", "value", "value"}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			groups.Aggregation(typs, cols)
+		}
+	})
+}
+
+func BenchmarkDataFrame_GroupByAggregationIntKey(b *testing.B) {
+	n := 100000
+	keys := make([]int, n)
+	values := make([]float64, n)
+	for i := 0; i < n; i++ {
+		keys[i] = i % 100
+		values[i] = float64(i % 1000)
+	}
+	df := dataframe.New(
+		series.New(keys, series.Int, "key"),
+		series.New(values, series.Float, "value"),
+	)
+
+	b.Run("GroupByOnly", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			df.GroupBy("key")
+		}
+	})
+	b.Run("GroupBySum", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			groups := df.GroupBy("key")
+			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_SUM}, []string{"value"})
+		}
+	})
+}
+
+func BenchmarkDataFrame_GroupByAggregationTwoKeys(b *testing.B) {
+	n := 100000
+	keyA := make([]string, n)
+	keyB := make([]int, n)
+	values := make([]float64, n)
+	for i := 0; i < n; i++ {
+		keyA[i] = "k" + strconv.Itoa(i%100)
+		keyB[i] = i % 10
+		values[i] = float64(i % 1000)
+	}
+	df := dataframe.New(
+		series.New(keyA, series.String, "key_a"),
+		series.New(keyB, series.Int, "key_b"),
+		series.New(values, series.Float, "value"),
+	)
+
+	b.Run("GroupByOnly", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			df.GroupBy("key_a", "key_b")
+		}
+	})
+	b.Run("GroupBySum", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			groups := df.GroupBy("key_a", "key_b")
+			groups.Aggregation([]dataframe.AggregationType{dataframe.Aggregation_SUM}, []string{"value"})
+		}
+	})
+}

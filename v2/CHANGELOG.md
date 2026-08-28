@@ -1,0 +1,494 @@
+# Change Log
+
+All notable changes to this project will be documented in this file.
+This project adheres to [Semantic Versioning](http://semver.org/).
+This document follows
+[markdownlint](https://github.com/markdownlint/markdownlint) formatting rules.
+
+## [1.4.0] - 2026-08-18
+
+### Added
+
+- Series string operations: `Upper`, `Lower`, `TrimSpace`, `Trim`,
+  `TrimPrefix`, `TrimSuffix`, and substring-level `ReplaceAll`, plus the
+  Bool-producing predicates `Contains`, `StartsWith`, and `EndsWith`. NaN
+  elements propagate; non-String inputs set Err. Value-level replacement
+  stays on `Series.Replace`.
+- Series Time accessors: `Year`, `Month`, `Day`, `Hour`, `Minute`, `Second`,
+  and `Weekday` (Sunday = 0) return Int series from Time series; non-Time
+  inputs set Err.
+- DataFrame-level `Rolling(window)` (Mean/Sum/Min/Max/StdDev) and
+  `EWM(span)` / `EWMAlpha(alpha)` (Mean/Var/Std) builders. Without a column
+  list every numeric column is transformed and the rest pass through
+  unchanged; explicit column lists must be numeric and existing columns
+  (`ErrTypeMismatch`, `ErrColumnNotFound` via `errors.Is`).
+- Variadic `Concat` (vertical, unmatched columns become NaN) and
+  `ConcatColumns` (horizontal, CBind semantics) free functions.
+- `FillNaNStrategy` and `FillNaNStrategyLimit` aliases matching the
+  Series-side `FillNaN` spelling.
+
+## [1.3.1] - 2026-08-18
+
+### Fixed
+
+- `Drop` with an unknown column now reports `can't drop columns: ...`
+  instead of the misleading `can't select columns: ...` prefix; sentinel
+  matching via `errors.Is` is unchanged.
+
+### Documentation
+
+- README warns that `Col` returns a detached copy - modifications never
+  write back to the DataFrame - and shows the supported ways to update a
+  column (`Mutate`, `Assign`, `Set`).
+- README spells out `NewNoCopy`'s exact aliasing semantics: element writes
+  through `Series.Set` are visible, `Series.Append` is not.
+- README notes that Excel/Parquet/SQL adapter dependencies are part of the
+  module graph even for core-only users (split deferred to v2).
+
+## [1.3.0] - 2026-08-18
+
+### Added
+
+- Public schema model: `dataframe.Schema` and `dataframe.Field` expose the
+  ordered column layout (name, physical type, nullability) with `Names`,
+  `Types`, `Field`, and `Equal` for join/concat compatibility checks;
+  `FromSchema` builds conforming zero-row frames for output buffers and
+  streaming accumulators.
+- `errors.Is` matching for the exported sentinel errors. Core failure paths
+  (empty frames, unknown columns, out-of-range indexes, length mismatches,
+  join key problems, invalid aggregations, missing index labels) now wrap
+  `ErrEmptyDataFrame`, `ErrColumnNotFound`, `ErrIndexOutOfRange`,
+  `ErrLengthMismatch`, `ErrKeyNotFound`, `ErrEmptyKeys`, and
+  `ErrInvalidAggregation` without changing any message text. Query unknown
+  columns, XLSX style columns, and empty Excel sheets follow in this release.
+- Documentation checks and a release checklist: README and ROADMAP anchor
+  links are verified as part of the test suite (`internal/doccheck`), and CI
+  requires the latest tag to have a dated CHANGELOG heading.
+- Fuzz/property tests for joins (single-key and collision-prone composite-key
+  InnerJoin, LeftJoin row counts) and Index/MultiIndex lookups (full and
+  partial keys, separator-like labels), all validated against brute-force
+  references.
+- Ownership-contract tests pinning the documented behavior of mutating
+  operations (`Set`, `FillNaN`, `SetNames`), struct-copy column sharing,
+  `NewNoCopy` aliasing versus `New` copying, `Copy` protection, and sticky
+  error propagation.
+
+### Fixed
+
+- `Select`/`Drop` with an unknown column name no longer emit a doubled
+  "can't select columns: can't select columns: ..." prefix, and the wrapped
+  error chain now uses `%w` so `errors.Is` sees through the operation prefix.
+
+## [1.2.2] - 2026-08-17
+
+### Added
+
+- GitHub Actions CI: gofmt/vet/build/test matrix across Linux, Windows, and
+  macOS on Go 1.24.9 and stable, a race-detector job, short fuzz-smoke runs,
+  and a benchmark job that compares results against the cached master
+  baseline with benchstat.
+- Fuzz tests for Query expression parsing, CSV delimiter detection, Parquet
+  round-trips, and `BatchConvertStrings` type conversion.
+- Direct unit tests for the grouped-aggregation, factorization, Shift, Mode,
+  Skew, and Kurt fast paths (series statement coverage 56% -> 83%).
+
+### Fixed
+
+- `Query` no longer panics on non-UTF-8 expressions. The operator scan
+  previously used byte offsets from a `strings.ToLower` copy, whose length
+  can differ from the original string, causing a slice-bounds panic.
+- `ReadParquet` on a Parquet file with zero data rows now returns an empty
+  typed DataFrame instead of an "empty DataFrame" error.
+
+## [1.2.1] - 2026-08-07
+
+This patch release contains the backward-compatible work since v1.2.0.
+
+### Added
+
+- Optional delimiter detection for `ReadCSV` and `ScanCSV`.
+- Multi-sheet Excel reads and Excel write formatting options.
+- SQLite/PostgreSQL upsert options for `WriteSQL`.
+- Parquet read/write for String, Int, Float, Bool, and Time columns.
+
+### Changed
+
+- Hash joins now use collision-safe composite key encoding and document expected
+  `O(n+m+k)` complexity, where `k` is the output size.
+- Query now implements `AND` precedence over `OR`, parentheses, quoted column
+  names, and quoted values containing logical words or commas.
+- Parquet writes use bounded batches and encode missing values as Parquet nulls.
+- README and ROADMAP now describe the supported single-process, in-memory scope,
+  ownership caveats, index behavior, and v1 release line.
+
+### Fixed
+
+- Composite string join keys can no longer collide when values contain delimiter
+  or type-like text.
+- MultiIndex partial keys no longer match a prefix of a different level label;
+  labels containing the old separator remain distinct.
+- Parquet nulls round-trip for every supported type, including false, zero,
+  empty strings, and Time values adjacent to nulls.
+- README release versions, mutability contract, Markdown rendering, and the
+  license identifier (Apache-2.0, matching `LICENSE.md`).
+
+## [1.2.0] - 2026-07-06
+
+### Added
+
+- DataFrame operations including `Shift`, `Assign`, `ExplodeOn`, `Query`,
+  `Stack`, `Unstack`, `Resample`, `Interpolate`, `CrossTab`, `RenameAll`, and
+  `ApplyMapTyped`.
+- Parallel column, row, grouped aggregation, and large-DataFrame arrange paths.
+- Index and MultiIndex wrappers with full and partial label lookup.
+- Series EWM variance/stddev, cumulative and math operations, `Mode`, `Skew`,
+  `Kurt`, generic batch conversion, and standalone Categorical values.
+- Excel sheet selection and multi-sheet output, SQL placeholder styles,
+  streaming CSV, and NDJSON I/O.
+
+### Changed
+
+- Rolling standard deviation uses Welford's algorithm; grouped aggregation,
+  resampling, unstacking, value counts, and row-wise apply reduce repeated work
+  and allocations.
+- `Describe` includes count/nunique and Time min/max values.
+
+### Fixed
+
+- Time Series copy/append/subset/fill gaps and BatchConvert pool use-after-free.
+- Empty grouped aggregation and unsupported Unstack inputs return errors instead
+  of panicking.
+- GroupBy transform row order, hidden group columns, ScanCSV batch ownership,
+  sample order, NDJSON buffer size, and division-by-zero behavior.
+
+## [1.1.0] - 2026-03-16
+
+### Added
+
+- Excel (xlsx) read/write and SQL read/write adapters.
+- Hash-based join implementation and basic Index support.
+- Expanded rolling-window operations and exponentially weighted moving
+  (EWM) statistics for Series.
+- Additional Series and DataFrame extension methods with tests.
+
+## [1.0.0] - 2024-03-19
+
+First stable release line. The 1.0.x patch series (1.0.1 through 1.0.16,
+2024-03 to 2025-02) consolidated the following on top of 0.12.0:
+
+### Added
+
+- `DataFrame.Pivot`, `DataFrame.T`, `DataFrame.SliceRow`, `DataFrame.GetRow`,
+  and `DataFrame.Show`.
+- `Series.Fill`, `Series.FillNaN`, `Series.Sum`, `Series.Out`, and the `Time`
+  element type with load support.
+- `WithSkipColNames` load option and `mat` helpers (`Mul`, `Cal`) with `Add`
+  fixes.
+
+### Changed
+
+- Type detection (`findType`) and `Groups.Aggregation` improvements.
+
+## [0.12.0] - 2021-10-10
+
+### Added in 0.12.0
+
+- Add dataframe.GetGroups (@arjunmahishi)
+- Add Series.Slice (@jfussion)
+- Add csv lazy quote (@fredericlemoine)
+
+### Changed in 0.12.0
+
+- series.Err is deprecated; use Error() instead
+- dataframe.Err is deprecated; use Error() instead
+
+### Fixed in 0.12.0
+
+- Fix dataframe.GroupBy issue (@prliu)
+- making series Order stable (@mcolosimo-p4)
+
+## [0.11.0] - 2021-06-27
+
+### Added in 0.11.0
+
+- Rolling window Mean and StdDev
+- GroupBy and Aggregate
+- Numeric column index
+- Read HTML tables
+- extra checks for TravisCI
+- Combining filters with AND
+- User-defined filters
+- Concatination of Dataframes
+
+### Changed in 0.11.0
+
+- Make fixColnames faster
+- Use Go 1.16
+- Update dependencies
+
+### Fixed in 0.11.0
+
+- Linter issues
+- Failing tests
+
+## [0.10.1] - 2019-11-08
+
+### Fixed in 0.10.1
+
+- LoadRecords printing type debug information
+- Missing closing brackets in series.go
+- Fix gonum import path in dataframe_test
+
+## [0.10.0] - 2019-11-08
+
+### Changed in 0.10.0
+
+- Merged dev branch changes from multiple collaborators (Sam Zaydel, Kyle
+  Ellrott, Daniela Petruzalek, Christoph Laaber).
+
+## [0.9.0] - 2016-10-03
+
+### Added in 0.9.0
+
+- Additional method to load arbitrary struct slices to DataFrames (Juan Álvarez)
+- New LoadOption Names to set initial column names (Sander van Harmelen).
+- Parser option for csv delimiter (Kyle Ellrott)
+- New Describe method for reporting summary statistics (Daniela Petruzalek)
+
+### Changed in 0.9.0
+
+- Improve the performance of multiple operations.
+- Code cleanup for better consistency (Sander van Harmelen)
+- Renamed 'Deselect' function to 'Drop' (Ben Marshall)
+
+## [0.8.0] - 2016-12-12
+
+### Added in 0.8.0
+
+- Series.Order method and tests.
+- Series.IsNaN method and tests.
+- DataFrame.Arrange method and tests.
+- DataFrame.Capply method and tests.
+- DataFrame.Rapply method and tests.
+- Benchmarks for several operations on both the `series` and
+  `dataframe` packages.
+- Many optimizations that increase the performance dramatically.
+- New LoadOption where the elements to be parsed as NaN from string
+  can be selected.
+- Gota can now return an implementation of `gonum/mat64.Matrix`
+  interface via `DataFrame.Matrix()` and load a `mat64.Matrix` via
+  `dataframe.LoadMatrix()`.
+
+### Changed in 0.8.0
+
+- elementInterface is now exported as Element.
+- Split element.go into separate files for the implementations of the
+  Element interface.
+- LoadOptions API has been renamed for better documentation via `godoc`.
+- `Series.Set` and `DataFrame.Set` now modify the structure in place
+  for performance considerations. If one wants to use the old
+  behaviour, it is suggested to use `DataFrame.Copy().Set(...)`
+  instead of `DataFrame.Set(...)`.
+- `DataFrame.Dim` has been changed to `DataFrame.Dims` for consistency
+  with the `mat64.Matrix` interface.
+- When printing a large `DataFrame` now the behaviour of the stringer
+  interface is much nicer, showing only the first 10 rows and limiting
+  the number of characters that can be shown by line
+
+### Removed in 0.8.0
+
+- Some unused functions from the helpers.go file.
+
+### Fix in 0.8.0
+
+- Linter errors.
+- stringElement.Float now returns NaN instead of 0 when applicable.
+- Autorenaming column names when `hasHeaders == false` now is
+  consistent with the autorename used with `dataframe.New`
+- Bug where duplicated column names were not been assigned consecutive
+  suffix numbers if the number of duplicates was greater than two.
+
+## [0.7.0] - 2016-11-27
+
+### Added in 0.7.0
+
+- Many more table tests for both `series` and `dataframe`
+- Set method for `Series` and `DataFrame`
+- When loading data from CSV, JSON, or Records, different
+  `LoadOptions` can now be configured. This includes assigning
+  a default type, manually specifying the column types and others.
+- More documentation for previously undocumented functions.
+
+### Changed in 0.7.0
+
+- The project has been restructured on separated `dataframe` and
+  `series` packages.
+- Reviewed entire `Series` codebase for better style and
+  maintainability.
+- `DataFrame.Select` now accepts several types of indexes
+- Error messages are now more consistent.
+- The standard way of checking for errors on both `series` and
+  `dataframe` is to check the `Err` field on each structure.
+- `ReadCSV`/`ReadJSON` and `WriteCSV`/`WriteJSON` now accept
+  `io.Reader` and `io.Writer` respectively.
+- Updated README with the new changes.
+
+### Removed in 0.7.0
+
+- Removed unnecessary abstraction layer on `Series.elements`
+
+## [0.6.0] - 2016-10-29
+
+### Added in 0.6.0
+
+- InnerJoin, CrossJoin, RightJoin, LeftJoin, OuterJoin functions
+
+### Changed in 0.6.0
+
+- More code refactoring for easier maintenance and management
+- Add more documentation to the exported functions
+- Remove unnecessary methods and structures from the exported API
+
+### Removed in 0.6.0
+
+- colnames and coltypes from the DataFrame structure
+
+## [0.5.0] - 2016-08-09
+
+### Added in 0.5.0
+
+- Read and write DataFrames from CSV, JSON, []map[string]interface{},
+  [][]string.
+- New constructor for DataFrame accept Series and NamedSeries as
+  arguments.
+- Subset, Select, Rename, Mutate, Filter, RBind and CBind methods
+- Much Better error handling
+
+### Changed in 0.5.0
+
+- Almost complete rewrite of DataFrame code.
+- Now using Series as first class citizens and building blocks for
+  DataFrames.
+
+### Removed in 0.5.0
+
+- Merge/Join functions have been temporarily removed to be adapted to
+  the new architecture.
+- Cell interface for allowing custom types into the system.
+
+## [0.4.0] - 2016-02-18
+
+### Added in 0.4.0
+
+- Getter methods for nrows and ncols.
+- An InnerJoin function that performs an Inner Merge/Join of two
+  DataFrames by the given keys.
+- An RightJoin and LeftJoin functions that performs outer right/outer
+  left joins of two DataFrames by the given keys.
+- A CrossJoin function that performs an Cross Merge/Join of two
+  DataFrames.
+- Cell interface now have to implement the NA() method that will
+  return a empty cell for the given type.
+- Cell interface now have to implement a Copy method.
+
+### Changed in 0.4.0
+
+- The `cell` interface is now exported: `Cell`.
+- Cell method NA() is now IsNA().
+- The function parseColumn is now a method.
+- A number of fields and methods are now expoted.
+
+### Fixed in 0.4.0
+
+- Now ensuring that generated subsets are in fact new copies entirely,
+  not copying pointers to the same memory address.
+
+## [0.3.0] - 2016-02-18
+
+### Added in 0.3.0
+
+- Getter and setter methods for the column names of a DataFrame
+- Bool column type has been made available
+- New Bool() interface
+- A `column` now can now if any of it's elements is NA and a list of
+  said NA elements ([]bool).
+
+### Changed in 0.3.0
+
+- Renamed `cell` interface elements to be more idiomatic:
+  - ToInteger() is now Int()
+  - ToFloat() is now Float()
+- The `cell` interface has changed. Int() and Float() now
+  return pointers instead of values to prevent future conflicts when
+  returning an error.
+- The `cell` interface has changed. Checksum() [16]byte added.
+- Using cell.Checksum() for identification of unique elements instead
+  of raw strings.
+- The `cell` interface has changed, now also requires ToBool() method.
+- String type now does not contain a string, but a pointer to a string.
+
+### Fixed in 0.3.0
+
+- Bool type constructor function Bools now parses `bool` and `[]bool`
+  elements correctly.
+- Int type constructor function Ints now parses `bool` and `[]bool`
+  elements correctly.
+- Float type constructor function Floats now parses `bool` and `[]bool`
+  elements correctly.
+- String type constructor function Strings now parses `bool` and `[]bool`
+  elements correctly.
+
+## [0.2.1] - 2016-02-14
+
+### Fixed in 0.2.1
+
+- Fixed a bug when the maximum number of characters on a column was
+  not being updated properly when subsetting.
+
+## [0.2.0] - 2016-02-13
+
+### Added in 0.2.0
+
+- Added a lot of unit tests
+
+### Changed in 0.2.0
+
+- The base types are now `df.String`, `df.Int`, and `df.Float`.
+- Restructured the project in different files.
+- Refactored the project so that it will allow columns to be of any
+  type as long as it complies with the necessary interfaces.
+
+## [0.1.0] - 2016-02-06
+
+### Added in 0.1.0
+
+- Load csv data to DataFrame.
+- Parse data to four supported types: `int`, `float64`, `date`
+  & `string`.
+- Row/Column subsetting (Indexing, column names, row numbers, range).
+- Unique/Duplicated row subsetting.
+- DataFrame combinations by rows and columns (cbind/rbind).
+
+[0.1.0]:https://github.com/dreamsxin/gota/compare/v0.1.0...v0.1.0
+[0.2.0]:https://github.com/dreamsxin/gota/compare/v0.1.0...v0.2.0
+[0.2.1]:https://github.com/dreamsxin/gota/compare/v0.2.0...v0.2.1
+[0.3.0]:https://github.com/dreamsxin/gota/compare/v0.2.1...v0.3.0
+[0.4.0]:https://github.com/dreamsxin/gota/compare/v0.3.0...v0.4.0
+[0.5.0]:https://github.com/dreamsxin/gota/compare/v0.4.0...v0.5.0
+[0.6.0]:https://github.com/dreamsxin/gota/compare/v0.5.0...v0.6.0
+[0.7.0]:https://github.com/dreamsxin/gota/compare/v0.6.0...v0.7.0
+[0.8.0]:https://github.com/dreamsxin/gota/compare/v0.7.0...v0.8.0
+[0.9.0]:https://github.com/dreamsxin/gota/compare/v0.8.0...v0.9.0
+[0.10.0]:https://github.com/dreamsxin/gota/compare/v0.9.0...v0.10.0
+[0.10.1]:https://github.com/dreamsxin/gota/compare/v0.10.0...v0.10.1
+[0.11.0]:https://github.com/dreamsxin/gota/compare/v0.10.1...v0.11.0
+[0.12.0]:https://github.com/dreamsxin/gota/compare/v0.11.0...v0.12.0
+[1.0.0]:https://github.com/dreamsxin/gota/compare/v0.12.0...v1.0.0
+[1.1.0]:https://github.com/dreamsxin/gota/compare/v1.0.0...v1.1.0
+[1.2.0]:https://github.com/dreamsxin/gota/compare/v1.1.0...v1.2.0
+[1.2.1]:https://github.com/dreamsxin/gota/compare/v1.2.0...v1.2.1
+
+[1.2.2]:https://github.com/dreamsxin/gota/compare/v1.2.1...v1.2.2
+[1.3.0]:https://github.com/dreamsxin/gota/compare/v1.2.2...v1.3.0
+[1.3.1]:https://github.com/dreamsxin/gota/compare/v1.3.0...v1.3.1
+[1.4.0]:https://github.com/dreamsxin/gota/compare/v1.3.1...v1.4.0

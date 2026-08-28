@@ -1,0 +1,88 @@
+package dataframe
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/dreamsxin/gota/v2/series"
+)
+
+// ReadNDJSON reads a newline-delimited JSON (NDJSON / JSON Lines) stream.
+// Each line must be a JSON object; keys become column names.
+// Empty lines and lines starting with '#' are skipped.
+//
+// Example:
+//
+//	f, _ := os.Open("data.ndjson")
+//	df := dataframe.ReadNDJSON(f)
+func ReadNDJSON(r io.Reader, options ...LoadOption) DataFrame {
+	scanner := bufio.NewScanner(r)
+	// Increase buffer to 10 MB to handle large JSON objects per line.
+	const maxScanBuf = 10 * 1024 * 1024
+	scanner.Buffer(make([]byte, 64*1024), maxScanBuf)
+	var records []map[string]interface{}
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		var obj map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			return DataFrame{Err: fmt.Errorf("ReadNDJSON: %v", err)}
+		}
+		records = append(records, obj)
+	}
+	if err := scanner.Err(); err != nil {
+		return DataFrame{Err: fmt.Errorf("ReadNDJSON: %v", err)}
+	}
+	if len(records) == 0 {
+		return DataFrame{}
+	}
+	return LoadMaps(records, options...)
+}
+
+// WriteNDJSON writes the DataFrame as newline-delimited JSON to w.
+// Each row becomes one JSON object on its own line.
+// NaN values are written as JSON null.
+//
+// Example:
+//
+//	f, _ := os.Create("out.ndjson")
+//	err := df.WriteNDJSON(f)
+func (df DataFrame) WriteNDJSON(w io.Writer) error {
+	if df.Err != nil {
+		return df.Err
+	}
+	names := df.Names()
+	types := df.Types()
+	enc := json.NewEncoder(w)
+	for i := 0; i < df.nrows; i++ {
+		obj := make(map[string]interface{}, df.ncols)
+		for j, name := range names {
+			col := df.columns[j]
+			if col.IsNA(i) {
+				obj[name] = nil
+				continue
+			}
+			switch types[j] {
+			case series.Int:
+				v, _ := col.IntAt(i)
+				obj[name] = v
+			case series.Float:
+				obj[name] = col.FloatAt(i)
+			case series.Bool:
+				v, _ := col.BoolAt(i)
+				obj[name] = v
+			default:
+				obj[name] = col.Record(i)
+			}
+		}
+		if err := enc.Encode(obj); err != nil {
+			return fmt.Errorf("WriteNDJSON row %d: %v", i, err)
+		}
+	}
+	return nil
+}

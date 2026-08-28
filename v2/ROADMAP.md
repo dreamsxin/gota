@@ -120,7 +120,7 @@ the v2 module reorganization if the kernel work proceeds.
 
 ## Later: Columnar Kernel RFC
 
-Design document: [v2/docs/rfc-columnar-kernel.md](v2/docs/rfc-columnar-kernel.md)
+Design document: [docs/rfc-columnar-kernel.md](docs/rfc-columnar-kernel.md)
 (accepted 2026-08-18, revised 2026-08-28; sort snapshot views, chain-local
 string interning, byte-budget batch chunking, and Rapply removal decided in
 its §9). The measured v1 baseline it builds on, anchored by the committed
@@ -137,9 +137,9 @@ collection of independent features.
   the kernel path at v2; the Int-vs-NaN semantics change activates with the
   /v2 module bump, not earlier).
 - [x] Prototype contiguous typed buffers with a validity bitmap and batch
-  kernels (landed in the `v2/` major-version subdirectory as a clean break:
-  buffers plus the aggregate/compare/fill kernels replaced the element
-  storage directly; see Milestone 1 below).
+  kernels (landed in the `v2/` directory as a clean break: buffers plus the
+  aggregate/compare/fill kernels replaced the element storage directly; see
+  Milestone 1 below).
 - [x] Measure memory use and representative operations against the v1.2.1
   element-based implementation (Copy 100k Int: 252 µs / 1.6 MB → 90 µs /
   0.8 MB; Mean 1M Float: 4.9 ms / 8 MB → 0.13 ms / 0 allocs).
@@ -161,10 +161,11 @@ together in v2.0.0 and are enumerated in the CHANGELOG and a migration
 guide.
 
 - [x] Milestone 1: column buffers behind the Series API, memory ~2x down,
-  benchmarks improved against the §1 baseline. Landed in `v2/` with a scope
-  decision: since compatibility is not an obligation, the `Element`/`Elem`
-  API and the `Rapply` family were removed in the same step instead of
-  Milestone 4, and the module path moved to `/v2` with the directory move.
+  benchmarks improved against the §1 baseline. Landed in the `v2/`
+  directory with a scope decision: since compatibility is not an
+  obligation, the `Element`/`Elem` API and the `Rapply` family were removed
+  in the same step instead of Milestone 4, and the module path moved to
+  `/v2` with the directory move.
 - [ ] Milestone 2: batch kernels for filters, sorting, joins, with
   golden-output tests; `BatchTransform` registration.
 - [ ] Milestone 3: DType system; `Categorical` as the Dictionary DType;
