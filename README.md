@@ -8,6 +8,14 @@ and data wrangling methods for Go, inspired by pandas. Gota provides an eager Go
 API rather than pandas API parity. The API is still evolving, so review release
 notes when upgrading.
 
+**v2 development:** the `v2` branch carries the columnar kernel redesign
+(typed column buffers with validity bitmaps, see
+[docs/rfc-columnar-kernel.md](docs/rfc-columnar-kernel.md)). It is a clean
+break from the API documented here: the `Element`/`Elem` surface and the
+`Rapply` family are removed in favor of typed Series accessors and
+column-wise apply. This README documents the v1.x API; until v2.0.0 is
+tagged, v1.x receives fixes only.
+
 ## Table of Contents
 
 - [Installation](#installation)
